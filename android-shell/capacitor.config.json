@@ -1,0 +1,13 @@
+{
+  "appId": "com.richardhan.jizhang",
+  "appName": "記帳",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": ["*"]
+  }
+}
