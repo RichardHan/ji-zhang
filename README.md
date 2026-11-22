@@ -1,3 +1,30 @@
+# ji-zhang（記帳）
+
+這是一個不需自架伺服器的記帳 App：帳目存在你自己的 Google 試算表，AI 記帳使用 [OpenRouter](https://openrouter.ai/) 的免費模型。Android APK 由 Capacitor 包裝 `app/` 裡的 Vue 3 介面，應用程式 ID 為 `com.richardhan.jizhang`。
+
+- 用 Google 登入，新建或指定一張名為「ji-zhang 記帳」的試算表
+- 輸入「午餐 120 信用卡」或「昨天晚餐 350 搭車 180」，AI 解析後請你確認再寫入
+- 也提供手動記帳、明細修改／刪除，以及本月收支與分類圖表
+- OpenRouter 金鑰只存在手機裡，不會進這個 repo
+
+完整的 Google Cloud、OAuth、GitHub 變數與安裝步驟，請看 **[docs/android-apk.md](docs/android-apk.md)**。
+
+你需要自己完成的事項：
+
+1. 在 Google Cloud 建立專案，啟用 **Google Sheets API** 與 **Google Drive API**
+2. 設定 OAuth 同意畫面（測試模式），把自己的 Gmail 加成測試使用者，並加入 `spreadsheets`、`drive.file` 範圍
+3. 建立 **Web** OAuth 用戶端，以及 **Android** OAuth 用戶端（套件名稱 `com.richardhan.jizhang`，SHA-1 為 `1E:C9:81:11:85:40:41:A8:C3:AC:B7:35:5A:C3:30:1E:9C:B3:EE:E0`）
+4. 把 Web 用戶端 ID 設成 GitHub Actions variable（或 secret）`GOOGLE_WEB_CLIENT_ID`，再跑一次 APK 建置
+5. 到 [OpenRouter](https://openrouter.ai/keys) 申請金鑰，在 App 的設定頁貼上
+
+預設 AI 模型：`google/gemma-4-26b-a4b-it:free`（備用：`inclusionai/ling-3.2-flash:free`）。
+
+這個 repo 仍保留 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的原始碼（MIT）作為參考，位於根目錄；目前上架的 App 已改走 Google Sheets，不再需要 ezBookkeeping 伺服器。
+
+---
+
+# ezBookkeeping（參考用原始碼）
+
 # ezBookkeeping
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/mayswind/ezbookkeeping/blob/master/LICENSE)
 [![Latest Release](https://img.shields.io/github/release/mayswind/ezbookkeeping.svg?style=flat)](https://github.com/mayswind/ezbookkeeping/releases)

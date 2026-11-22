@@ -1,14 +1,16 @@
 {
   "name": "ji-zhang-android-shell",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Thin Capacitor Android shell that opens a self-hosted ji-zhang / ezBookkeeping server",
+  "description": "Capacitor Android wrapper that bundles the ji-zhang Vue app (Google Sheets + OpenRouter)",
   "scripts": {
     "sync": "cap sync android"
   },
   "dependencies": {
     "@capacitor/android": "8.6.2",
-    "@capacitor/core": "8.6.2"
+    "@capacitor/core": "8.6.2",
+    "@capacitor/preferences": "8.0.1",
+    "@capgo/capacitor-social-login": "8.7.13"
   },
   "devDependencies": {
     "@capacitor/cli": "8.6.2"

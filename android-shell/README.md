@@ -1,5 +1,5 @@
 # android-shell
 
-Thin Capacitor Android wrapper for ji-zhang. This package is independent of the Vue/Go app at the repository root (`npm run build` in the root does not touch this folder).
+Capacitor Android 包裝，用來把 `app/` 裡的 Vue 記帳介面打成 APK。`webDir` 指向 `../app/dist`，請先在 `app/` 執行 `npm ci && npm run build`，再在這裡執行 `npx cap sync android`。
 
-The app asks for a self-hosted server URL, then opens `{url}/mobile` in the WebView. See `docs/android-apk.md`.
+應用程式 ID 仍是 `com.richardhan.jizhang`，可覆蓋安裝先前的版本。說明見 `docs/android-apk.md`。

@@ -1,90 +1,38 @@
 package com.richardhan.jizhang;
 
 import android.content.Intent;
-import android.os.Bundle;
-import android.webkit.WebResourceError;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebView;
+import android.util.Log;
 import com.getcapacitor.BridgeActivity;
-import com.getcapacitor.BridgeWebViewClient;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginHandle;
+import ee.forgr.capacitor.social.login.GoogleProvider;
+import ee.forgr.capacitor.social.login.ModifiedMainActivityForSocialLoginPlugin;
+import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 
-public class MainActivity extends BridgeActivity {
-    static final String ACTION_CHANGE_SERVER = "com.richardhan.jizhang.CHANGE_SERVER";
-
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        installErrorClient();
-        handleIntent(getIntent());
-    }
+// Required so Google API scopes (Sheets) can complete authorization on Android.
+public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
 
     @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        handleIntent(intent);
-    }
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
 
-    private void installErrorClient() {
-        if (getBridge() == null || getBridge().getWebView() == null) {
-            return;
-        }
-        getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
-            @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (shouldReturnToSettings(request)) {
-                    loadLocalPage("error=1");
-                    return;
-                }
-                super.onReceivedError(view, request, error);
+        if (requestCode >= GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MIN
+                && requestCode < GoogleProvider.REQUEST_AUTHORIZE_GOOGLE_MAX) {
+            PluginHandle pluginHandle = getBridge().getPlugin("SocialLogin");
+            if (pluginHandle == null) {
+                Log.i("Google Activity Result", "SocialLogin plugin handle is null");
+                return;
             }
-
-            @Override
-            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
-                if (shouldReturnToSettings(request) && errorResponse != null && errorResponse.getStatusCode() >= 400) {
-                    loadLocalPage("error=1");
-                    return;
-                }
-                super.onReceivedHttpError(view, request, errorResponse);
+            Plugin plugin = pluginHandle.getInstance();
+            if (!(plugin instanceof SocialLoginPlugin)) {
+                Log.i("Google Activity Result", "SocialLogin plugin instance is not SocialLoginPlugin");
+                return;
             }
-        });
-    }
-
-    private boolean shouldReturnToSettings(WebResourceRequest request) {
-        if (request == null || !request.isForMainFrame() || request.getUrl() == null) {
-            return false;
-        }
-        return !isLocalUrl(request.getUrl().toString());
-    }
-
-    private boolean isLocalUrl(String url) {
-        if (url == null) {
-            return false;
-        }
-        return url.startsWith("https://localhost")
-            || url.startsWith("http://localhost")
-            || url.startsWith("capacitor://localhost");
-    }
-
-    private void handleIntent(Intent intent) {
-        if (intent != null && ACTION_CHANGE_SERVER.equals(intent.getAction())) {
-            loadLocalPage("settings=1");
+            ((SocialLoginPlugin) plugin).handleGoogleLoginIntent(requestCode, data);
         }
     }
 
-    private void loadLocalPage(String query) {
-        if (getBridge() == null || getBridge().getWebView() == null) {
-            return;
-        }
-        String base = getBridge().getLocalUrl();
-        if (base == null || base.isEmpty()) {
-            base = "https://localhost";
-        }
-        if (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        String target = base + "/index.html?" + query;
-        getBridge().getWebView().post(() -> getBridge().getWebView().loadUrl(target));
-    }
+    // This function will never be called; the plugin only checks that the interface is implemented.
+    @Override
+    public void IHaveModifiedTheMainActivityForTheUseWithSocialLoginPlugin() {}
 }

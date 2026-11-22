@@ -1,13 +1,21 @@
 {
   "appId": "com.richardhan.jizhang",
   "appName": "記帳",
-  "webDir": "www",
+  "webDir": "../app/dist",
   "android": {
     "allowMixedContent": true
   },
-  "server": {
-    "androidScheme": "https",
-    "cleartext": true,
-    "allowNavigation": ["*"]
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SocialLogin": {
+      "providers": {
+        "google": true,
+        "facebook": false,
+        "apple": false,
+        "twitter": false
+      }
+    }
   }
 }

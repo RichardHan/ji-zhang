@@ -1,5 +1,5 @@
-# Debug APK for the Capacitor Android shell in android-shell/.
-# Runs on push to main when the shell or this workflow change, and on workflow_dispatch.
+# Debug APK for the Capacitor Android app (Vue app in app/ + shell in android-shell/).
+# Runs on push to main when the app, shell, or this workflow change, and on workflow_dispatch.
 # Publishes a 14-day Actions artifact only — no GitHub Release.
 name: Android APK build
 
@@ -8,6 +8,7 @@ on:
     branches:
       - main
     paths:
+      - 'app/**'
       - 'android-shell/**'
       - '.github/workflows/android_apk_build.yml'
   workflow_dispatch:
@@ -52,7 +53,9 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: android-shell/package-lock.json
+          cache-dependency-path: |
+            app/package-lock.json
+            android-shell/package-lock.json
 
       - name: Set up Gradle (wrapper validation + cache)
         uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
@@ -135,10 +138,24 @@ jobs:
           rm -f "$zip.part"
           echo "::error::Official Gradle distribution unavailable after 6 bounded attempts"; exit 1
 
+      - name: Build web app
+        working-directory: app
+        env:
+          # Optional. Build still succeeds when unset; the app then explains that Google sign-in is not configured.
+          VITE_GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
       - name: Install JS dependencies and sync Capacitor
         working-directory: android-shell
         run: |
           set -euo pipefail
+          if [ ! -d ../app/dist ]; then
+            echo "::error::app/dist is missing. The web app must be built before cap sync."
+            exit 1
+          fi
           npm ci
           npx cap sync android
 

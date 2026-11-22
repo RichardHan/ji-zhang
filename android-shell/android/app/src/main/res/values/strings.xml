@@ -4,6 +4,4 @@
     <string name="title_activity_main">記帳</string>
     <string name="package_name">com.richardhan.jizhang</string>
     <string name="custom_url_scheme">com.richardhan.jizhang</string>
-    <string name="change_server_short">變更伺服器</string>
-    <string name="change_server_long">變更伺服器位址</string>
 </resources>

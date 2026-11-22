@@ -1,0 +1,29 @@
+{
+  "name": "ji-zhang-app",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "ji-zhang bookkeeping web app: Google Sheets storage + OpenRouter AI, bundled in the Capacitor Android shell",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.2",
+    "@capacitor/preferences": "8.0.1",
+    "@capgo/capacitor-social-login": "8.7.13",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.12",
+    "vue-tsc": "^3.1.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
