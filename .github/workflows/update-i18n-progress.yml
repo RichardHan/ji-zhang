@@ -1,12 +1,6 @@
 name: Update i18n Translation Progress Badges
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/locales/**'
-      - 'pkg/locales/**'
   workflow_dispatch:
 
 jobs:
