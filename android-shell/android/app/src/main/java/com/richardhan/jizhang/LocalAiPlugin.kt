@@ -168,7 +168,7 @@ class LocalAiPlugin : Plugin() {
         }
         val path = file.absolutePath
         val existing = activeEngine
-        if (existing != null && activeModelPath == path && existing.isInitialized) {
+        if (existing != null && activeModelPath == path && existing.isInitialized()) {
             return existing
         }
         closeEngineLocked()
