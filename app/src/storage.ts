@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
+import type { PendingBatch } from './types'
 
 const KEYS = {
   openRouterKey: 'openrouter_api_key',
@@ -8,6 +9,7 @@ const KEYS = {
   email: 'google_email',
   name: 'google_name',
   imageUrl: 'google_image',
+  pendingBatches: 'pending_transaction_batches',
 } as const
 
 async function get(key: string): Promise<string> {
@@ -40,6 +42,15 @@ export const storage = {
     await set(KEYS.name, name)
     await set(KEYS.imageUrl, imageUrl)
   },
+  getPendingBatches: async (): Promise<PendingBatch[]> => {
+    const json = await get(KEYS.pendingBatches)
+    if (!json) return []
+    const batches: unknown = JSON.parse(json)
+    if (!Array.isArray(batches)) throw new Error('Invalid pending transaction queue')
+    return batches as PendingBatch[]
+  },
+  setPendingBatches: (batches: PendingBatch[]) =>
+    set(KEYS.pendingBatches, batches.length ? JSON.stringify(batches) : ''),
   clearAuth: async () => {
     await Preferences.remove({ key: KEYS.email })
     await Preferences.remove({ key: KEYS.name })
