@@ -1,5 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
-import type { AiProviderId, ModelSelectionMode } from './types'
+import type { AiProviderId, LocalModelId, ModelSelectionMode } from './types'
 
 const KEYS = {
   openRouterKey: 'openrouter_api_key',
@@ -8,7 +8,10 @@ const KEYS = {
   aiProvider: 'ai_provider',
   textModelMode: 'text_model_mode',
   visionModelMode: 'vision_model_mode',
+  localModelId: 'local_model_id',
   wifiOnlyDownload: 'local_wifi_only',
+  enableNanoFallback: 'enable_nano_fallback',
+  paidFailureFallbackToFree: 'paid_failure_fallback_free',
   modelsCache: 'openrouter_models_cache',
   modelsCacheAt: 'openrouter_models_cache_at',
   spreadsheetId: 'spreadsheet_id',
@@ -40,6 +43,10 @@ function parseMode(value: string): ModelSelectionMode {
   return value === 'manual' ? 'manual' : 'auto-free'
 }
 
+function parseLocalModel(value: string): LocalModelId {
+  return value === 'qwen3.5-0.8b-vl' ? 'qwen3.5-0.8b-vl' : 'gemma-4-e2b'
+}
+
 export const storage = {
   getOpenRouterKey: () => get(KEYS.openRouterKey),
   setOpenRouterKey: (value: string) => set(KEYS.openRouterKey, value.trim()),
@@ -53,8 +60,16 @@ export const storage = {
   setTextModelMode: (value: ModelSelectionMode) => set(KEYS.textModelMode, value),
   getVisionModelMode: async (): Promise<ModelSelectionMode> => parseMode(await get(KEYS.visionModelMode)),
   setVisionModelMode: (value: ModelSelectionMode) => set(KEYS.visionModelMode, value),
+  getLocalModelId: async (): Promise<LocalModelId> => parseLocalModel(await get(KEYS.localModelId)),
+  setLocalModelId: (value: LocalModelId) => set(KEYS.localModelId, value),
   getWifiOnlyDownload: async (): Promise<boolean> => (await get(KEYS.wifiOnlyDownload)) !== '0',
   setWifiOnlyDownload: (value: boolean) => set(KEYS.wifiOnlyDownload, value ? '1' : '0'),
+  getEnableNanoFallback: async (): Promise<boolean> => (await get(KEYS.enableNanoFallback)) !== '0',
+  setEnableNanoFallback: (value: boolean) => set(KEYS.enableNanoFallback, value ? '1' : '0'),
+  getPaidFailureFallbackToFree: async (): Promise<boolean> =>
+    (await get(KEYS.paidFailureFallbackToFree)) !== '0',
+  setPaidFailureFallbackToFree: (value: boolean) =>
+    set(KEYS.paidFailureFallbackToFree, value ? '1' : '0'),
   getModelsCache: () => get(KEYS.modelsCache),
   getModelsCacheAt: () => get(KEYS.modelsCacheAt),
   setModelsCache: async (json: string, cachedAt: number) => {

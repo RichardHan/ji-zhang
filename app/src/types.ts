@@ -5,6 +5,8 @@ export type AiProviderId = 'auto' | 'local' | 'openrouter'
 /** Default is auto-free: pick a live free OpenRouter model. Manual is an opt-in override. */
 export type ModelSelectionMode = 'auto-free' | 'manual'
 
+export type LocalModelId = 'gemma-4-e2b' | 'qwen3.5-0.8b-vl'
+
 export interface Transaction {
   id: string
   date: string
@@ -39,7 +41,10 @@ export interface AppSettings {
   visionModelMode: ModelSelectionMode
   model: string
   visionModel: string
+  localModelId: LocalModelId
   wifiOnlyDownload: boolean
+  enableNanoFallback: boolean
+  paidFailureFallbackToFree: boolean
   spreadsheetId: string
   spreadsheetUrl: string
 }

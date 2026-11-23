@@ -1,7 +1,19 @@
 import { todayISO } from '../dates'
+import type { LocalModelId } from '../types'
 import { LocalAi } from './local-plugin'
-import { draftsFromModelText } from './parse'
-import type { AiProvider, LocalAiStatus, MonthInsightInput, ParseResult } from './types'
+import {
+  draftsFromModelText,
+  resizeImageDataUrl,
+  textSystemPrompt,
+  visionSystemPrompt,
+} from './parse'
+import {
+  getLocalModelSpec,
+  type AiProvider,
+  type LocalAiStatus,
+  type MonthInsightInput,
+  type ParseResult,
+} from './types'
 
 function dataUrlToBase64(dataUrl: string): string {
   const comma = dataUrl.indexOf(',')
@@ -9,27 +21,41 @@ function dataUrlToBase64(dataUrl: string): string {
 }
 
 export class LocalProvider implements AiProvider {
-  readonly id = 'local' as const
+  readonly id: 'local' | 'nano'
+
+  constructor(
+    private readonly modelId: LocalModelId = 'gemma-4-e2b',
+    private readonly runtime: 'litert' | 'nano' = 'litert',
+  ) {
+    this.id = runtime === 'nano' ? 'nano' : 'local'
+  }
 
   async getStatus(): Promise<LocalAiStatus> {
+    const spec = getLocalModelSpec(this.modelId)
     try {
-      return await LocalAi.getStatus()
+      return await LocalAi.getStatus({ modelId: this.modelId })
     } catch (err) {
       return {
         available: false,
+        downloading: false,
+        downloadProgress: 0,
         reason: err instanceof Error ? err.message : String(err),
         backend: '',
-        modelName: '',
+        modelId: spec.id,
+        modelName: spec.label,
         modelPath: '',
         downloadedBytes: 0,
-        totalBytes: 0,
+        totalBytes: spec.sizeBytes,
+        freeStorageBytes: 0,
+        nanoStatus: 'unavailable',
+        nanoModelName: '',
       }
     }
   }
 
   async isAvailable(): Promise<boolean> {
     const status = await this.getStatus()
-    return status.available
+    return this.runtime === 'nano' ? status.nanoStatus === 'available' : status.available
   }
 
   async parseText(input: string): Promise<ParseResult> {
@@ -38,11 +64,16 @@ export class LocalProvider implements AiProvider {
       throw new Error('請先輸入要記的內容，例如「午餐 120 信用卡」。')
     }
     const today = todayISO()
-    const { text: content } = await LocalAi.parseText({ prompt: text, today })
+    const res = await LocalAi.parseText({
+      prompt: text,
+      systemPrompt: textSystemPrompt(today),
+      modelId: this.modelId,
+      runtime: this.runtime,
+    })
     return {
-      transactions: draftsFromModelText(content, today),
-      modelUsed: 'local',
-      provider: 'local',
+      transactions: draftsFromModelText(res.text, today),
+      modelUsed: res.modelUsed || (this.runtime === 'nano' ? 'gemini-nano' : this.modelId),
+      provider: this.id,
     }
   }
 
@@ -51,19 +82,34 @@ export class LocalProvider implements AiProvider {
       throw new Error('請先選取收據或電子發票的照片。')
     }
     const today = todayISO()
-    const { text: content } = await LocalAi.parseImage({
+    const resized = await resizeImageDataUrl(imageDataUrl, 1280, 0.85)
+    const res = await LocalAi.parseImage({
       prompt: hint.trim() || '請解析這張收據或電子發票。',
-      today,
-      imageBase64: dataUrlToBase64(imageDataUrl),
+      systemPrompt: visionSystemPrompt(today),
+      imageBase64: dataUrlToBase64(resized),
+      modelId: this.modelId,
+      runtime: this.runtime,
     })
     return {
-      transactions: draftsFromModelText(content, today),
-      modelUsed: 'local',
-      provider: 'local',
+      transactions: draftsFromModelText(res.text, today),
+      modelUsed: res.modelUsed || (this.runtime === 'nano' ? 'gemini-nano' : this.modelId),
+      provider: this.id,
     }
   }
 
-  async monthlyInsight(_summary: MonthInsightInput): Promise<string> {
-    throw new Error('本機模型尚未實作月報觀察。可改用 OpenRouter，或等本機模型就緒。')
+  async monthlyInsight(summary: MonthInsightInput): Promise<string> {
+    const lines = summary.byCategory
+      .map((c) => `${c.category} ${Math.round(c.amount)} 元`)
+      .join('、')
+    const prompt = `資料：${summary.month} 支出 ${Math.round(summary.expense)} 元，收入 ${Math.round(summary.income)} 元。支出分類：${lines || '無'}。`
+    const res = await LocalAi.parseText({
+      prompt,
+      systemPrompt: '用繁體中文寫一段不超過 80 字的記帳觀察，語氣平實、不要標題、不要建議投資商品。',
+      modelId: this.modelId,
+      runtime: this.runtime,
+    })
+    const out = res.text.trim()
+    if (!out) throw new Error('無法產生分析')
+    return out
   }
 }

@@ -17,7 +17,14 @@ import {
   updateTransaction,
 } from '../google/sheets'
 import { storage } from '../storage'
-import type { AiProviderId, DraftTransaction, ModelSelectionMode, Transaction, UserProfile } from '../types'
+import type {
+  AiProviderId,
+  DraftTransaction,
+  LocalModelId,
+  ModelSelectionMode,
+  Transaction,
+  UserProfile,
+} from '../types'
 
 interface AppState {
   ready: boolean
@@ -33,7 +40,10 @@ interface AppState {
   visionModelMode: ModelSelectionMode
   model: string
   visionModel: string
+  localModelId: LocalModelId
   wifiOnlyDownload: boolean
+  enableNanoFallback: boolean
+  paidFailureFallbackToFree: boolean
   transactions: Transaction[]
   selectedMonth: string
 }
@@ -53,7 +63,10 @@ function createAppStore() {
     visionModelMode: 'auto-free',
     model: '',
     visionModel: '',
+    localModelId: 'gemma-4-e2b',
     wifiOnlyDownload: true,
+    enableNanoFallback: true,
+    paidFailureFallbackToFree: true,
     transactions: [],
     selectedMonth: currentMonth(),
   })
@@ -72,7 +85,10 @@ function createAppStore() {
     state.visionModelMode = await storage.getVisionModelMode()
     state.model = await storage.getModel()
     state.visionModel = await storage.getVisionModel()
+    state.localModelId = await storage.getLocalModelId()
     state.wifiOnlyDownload = await storage.getWifiOnlyDownload()
+    state.enableNanoFallback = await storage.getEnableNanoFallback()
+    state.paidFailureFallbackToFree = await storage.getPaidFailureFallbackToFree()
     state.spreadsheetId = await storage.getSpreadsheetId()
     state.spreadsheetUrl = await storage.getSpreadsheetUrl()
     const email = await storage.getEmail()
@@ -221,7 +237,10 @@ function createAppStore() {
     visionModelMode?: ModelSelectionMode
     model?: string
     visionModel?: string
+    localModelId?: LocalModelId
     wifiOnlyDownload?: boolean
+    enableNanoFallback?: boolean
+    paidFailureFallbackToFree?: boolean
   }): Promise<void> {
     if (next.openRouterKey !== undefined) {
       state.openRouterKey = next.openRouterKey
@@ -247,9 +266,21 @@ function createAppStore() {
       state.visionModel = next.visionModel
       await storage.setVisionModel(next.visionModel)
     }
+    if (next.localModelId !== undefined) {
+      state.localModelId = next.localModelId
+      await storage.setLocalModelId(next.localModelId)
+    }
     if (next.wifiOnlyDownload !== undefined) {
       state.wifiOnlyDownload = next.wifiOnlyDownload
       await storage.setWifiOnlyDownload(next.wifiOnlyDownload)
+    }
+    if (next.enableNanoFallback !== undefined) {
+      state.enableNanoFallback = next.enableNanoFallback
+      await storage.setEnableNanoFallback(next.enableNanoFallback)
+    }
+    if (next.paidFailureFallbackToFree !== undefined) {
+      state.paidFailureFallbackToFree = next.paidFailureFallbackToFree
+      await storage.setPaidFailureFallbackToFree(next.paidFailureFallbackToFree)
     }
   }
 
@@ -261,6 +292,9 @@ function createAppStore() {
       visionModelMode: state.visionModelMode,
       textModel: state.model,
       visionModel: state.visionModel,
+      localModelId: state.localModelId,
+      enableNanoFallback: state.enableNanoFallback,
+      paidFailureFallbackToFree: state.paidFailureFallbackToFree,
     }
   }
 

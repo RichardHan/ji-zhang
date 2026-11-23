@@ -1,13 +1,39 @@
-import { registerPlugin, WebPlugin } from '@capacitor/core'
-import { LOCAL_MODEL_NAME, LOCAL_MODEL_SIZE_BYTES, type LocalAiStatus } from './types'
+import { registerPlugin, WebPlugin, type PluginListenerHandle } from '@capacitor/core'
+import type { LocalModelId } from '../types'
+import {
+  getLocalModelSpec,
+  type LocalAiStatus,
+  type LocalDownloadEvent,
+  type NanoDownloadEvent,
+} from './types'
 
 export interface LocalAiPlugin {
-  getStatus(): Promise<LocalAiStatus>
-  downloadModel(options: { wifiOnly: boolean }): Promise<void>
+  getStatus(options?: { modelId?: LocalModelId }): Promise<LocalAiStatus>
+  downloadModel(options: { modelId?: LocalModelId; wifiOnly: boolean }): Promise<void>
   cancelDownload(): Promise<void>
-  deleteModel(): Promise<void>
-  parseText(options: { prompt: string; today: string }): Promise<{ text: string }>
-  parseImage(options: { prompt: string; today: string; imageBase64: string }): Promise<{ text: string }>
+  deleteModel(options?: { modelId?: LocalModelId }): Promise<void>
+  downloadNano(): Promise<void>
+  parseText(options: {
+    prompt: string
+    systemPrompt: string
+    modelId?: LocalModelId
+    runtime?: 'litert' | 'nano'
+  }): Promise<{ text: string; modelUsed?: string; runtime?: string }>
+  parseImage(options: {
+    prompt: string
+    systemPrompt: string
+    imageBase64: string
+    modelId?: LocalModelId
+    runtime?: 'litert' | 'nano'
+  }): Promise<{ text: string; modelUsed?: string; runtime?: string }>
+  addListener(
+    eventName: 'localDownloadProgress',
+    listenerFunc: (event: LocalDownloadEvent) => void,
+  ): Promise<PluginListenerHandle>
+  addListener(
+    eventName: 'nanoDownloadProgress',
+    listenerFunc: (event: NanoDownloadEvent) => void,
+  ): Promise<PluginListenerHandle>
 }
 
 class LocalAiWeb extends WebPlugin implements LocalAiPlugin {
@@ -15,15 +41,22 @@ class LocalAiWeb extends WebPlugin implements LocalAiPlugin {
     throw new Error(`本機模型只在 Android App 內提供，目前無法${action}。`)
   }
 
-  async getStatus(): Promise<LocalAiStatus> {
+  async getStatus(options?: { modelId?: LocalModelId }): Promise<LocalAiStatus> {
+    const spec = getLocalModelSpec(options?.modelId ?? 'gemma-4-e2b')
     return {
       available: false,
-      reason: '本機模型只在 Android App 內提供。之後會用 LiteRT-LM 在手機上跑 Gemma 4 E2B。',
+      downloading: false,
+      downloadProgress: 0,
+      reason: '本機模型只在 Android App 內提供（LiteRT-LM / Gemini Nano）。',
       backend: '',
-      modelName: LOCAL_MODEL_NAME,
+      modelId: spec.id,
+      modelName: spec.label,
       modelPath: '',
       downloadedBytes: 0,
-      totalBytes: LOCAL_MODEL_SIZE_BYTES,
+      totalBytes: spec.sizeBytes,
+      freeStorageBytes: 0,
+      nanoStatus: 'unavailable',
+      nanoModelName: '',
     }
   }
 
@@ -37,6 +70,10 @@ class LocalAiWeb extends WebPlugin implements LocalAiPlugin {
 
   async deleteModel(): Promise<void> {
     this.notOnWeb('刪除')
+  }
+
+  async downloadNano(): Promise<void> {
+    this.notOnWeb('下載 Gemini Nano')
   }
 
   async parseText(): Promise<{ text: string }> {

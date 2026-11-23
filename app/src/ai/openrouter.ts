@@ -2,7 +2,12 @@ import type { ModelSelectionMode } from '../types'
 import { todayISO } from '../dates'
 import type { AiProvider, MonthInsightInput, ParseResult } from './types'
 import { draftsFromModelText, resizeImageDataUrl, textSystemPrompt, visionSystemPrompt } from './parse'
-import { resolveModelCandidates, type ModelKind } from './openrouter-models'
+import {
+  findCatalogModel,
+  listOpenRouterModels,
+  resolveModelCandidates,
+  type ModelKind,
+} from './openrouter-models'
 
 const OPENROUTER = 'https://openrouter.ai/api/v1/chat/completions'
 
@@ -14,6 +19,7 @@ export interface OpenRouterSettings {
   visionModelMode: ModelSelectionMode
   textModel: string
   visionModel: string
+  paidFailureFallbackToFree: boolean
 }
 
 interface HttpError extends Error {
@@ -76,6 +82,18 @@ function isRetriableStatus(status?: number): boolean {
   return status === 429 || status >= 500
 }
 
+async function isPaidModelId(id: string): Promise<boolean> {
+  if (id.endsWith(':free')) return false
+  try {
+    const models = await listOpenRouterModels()
+    const match = findCatalogModel(models, id)
+    if (match) return !match.isFree
+  } catch {
+    // Catalog unavailable: treat non-:free IDs conservatively as paid.
+  }
+  return true
+}
+
 async function tryModel(
   apiKey: string,
   model: string,
@@ -99,7 +117,7 @@ async function runWithCandidates(
   system: string,
   user: ChatContent,
   parse: (content: string) => ParseResult['transactions'] | string,
-): Promise<{ value: ParseResult['transactions'] | string; modelUsed: string }> {
+): Promise<{ value: ParseResult['transactions'] | string; modelUsed: string; notice?: string }> {
   if (!settings.apiKey.trim()) {
     throw new Error('請先在設定裡填入 OpenRouter API 金鑰。')
   }
@@ -121,6 +139,27 @@ async function runWithCandidates(
       }
     }
   }
+
+  // Manual model failed: never silently switch to another paid model.
+  // If allowed (default ON), fall back to free auto mode and surface a clear notice.
+  if (mode === 'manual' && settings.paidFailureFallbackToFree) {
+    const manualWasPaid = await isPaidModelId(manualId.trim())
+    const reason = lastError?.message || '請求失敗'
+    const freeCandidates = await resolveModelCandidates(kind, 'auto-free', '')
+    for (const freeId of freeCandidates.ids) {
+      if (freeId === manualId.trim()) continue
+      try {
+        const content = await tryModel(settings.apiKey, freeId, system, user)
+        const notice = manualWasPaid
+          ? `付費模型「${manualId}」失敗（${reason}），已改用免費模型「${freeId}」（不會自動切換其他付費模型）。`
+          : `指定模型「${manualId}」失敗（${reason}），已改用免費備援模型「${freeId}」。`
+        return { value: parse(content), modelUsed: freeId, notice }
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+      }
+    }
+  }
+
   throw lastError ?? new Error('AI 解析失敗')
 }
 
@@ -150,6 +189,7 @@ export class OpenRouterProvider implements AiProvider {
       transactions: result.value as ParseResult['transactions'],
       modelUsed: result.modelUsed,
       provider: 'openrouter',
+      notice: result.notice,
     }
   }
 
@@ -174,6 +214,7 @@ export class OpenRouterProvider implements AiProvider {
       transactions: result.value as ParseResult['transactions'],
       modelUsed: result.modelUsed,
       provider: 'openrouter',
+      notice: result.notice,
     }
   }
 
