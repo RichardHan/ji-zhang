@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import { ACCOUNTS, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '../constants'
-import { todayISO } from '../dates'
 import type { DraftTransaction, TxType } from '../types'
 
 const props = withDefaults(
   defineProps<{
     modelValue: DraftTransaction
     submitLabel?: string
+    disabled?: boolean
   }>(),
   { submitLabel: '儲存' },
 )
@@ -16,6 +16,7 @@ const emit = defineEmits<{
   submit: []
   cancel: []
 }>()
+const id = useId()
 
 const categories = computed(() =>
   props.modelValue.type === '收入' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES,
@@ -34,7 +35,7 @@ function setType(type: TxType) {
 }
 
 function onSubmit() {
-  emit('submit')
+  if (!props.disabled) emit('submit')
 }
 </script>
 
@@ -45,18 +46,21 @@ function onSubmit() {
       <button type="button" class="chip" :class="{ on: modelValue.type === '收入' }" @click="setType('收入')">收入</button>
     </div>
     <div class="field">
-      <label>日期</label>
+      <label :for="id + '-date'">日期</label>
       <input
+        :id="id + '-date'"
         type="date"
-        :value="modelValue.date || todayISO()"
+        :value="modelValue.date"
         @input="patch({ date: ($event.target as HTMLInputElement).value })"
+        required
       />
     </div>
     <div class="field">
-      <label>金額（TWD）</label>
+      <label :for="id + '-amount'">金額（TWD）</label>
       <input
+        :id="id + '-amount'"
         type="number"
-        min="0"
+        min="1"
         step="1"
         inputmode="numeric"
         :value="modelValue.amount || ''"
@@ -65,27 +69,32 @@ function onSubmit() {
       />
     </div>
     <div class="field">
-      <label>類別</label>
+      <label :for="id + '-category'">類別</label>
       <select
+        :id="id + '-category'"
         :value="modelValue.category"
         @change="patch({ category: ($event.target as HTMLSelectElement).value })"
       >
+        <option v-if="!categories.some((c) => c === modelValue.category)" :value="modelValue.category">{{ modelValue.category }}</option>
         <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
       </select>
     </div>
     <div class="field">
-      <label>帳戶／付款方式</label>
+      <label :for="id + '-account'">帳戶／付款方式</label>
       <select
+        :id="id + '-account'"
         :value="modelValue.account"
         @change="patch({ account: ($event.target as HTMLSelectElement).value })"
       >
         <option value="">未指定</option>
+        <option v-if="modelValue.account && !ACCOUNTS.some((a) => a === modelValue.account)" :value="modelValue.account">{{ modelValue.account }}</option>
         <option v-for="a in ACCOUNTS" :key="a" :value="a">{{ a }}</option>
       </select>
     </div>
     <div class="field">
-      <label>備註</label>
+      <label :for="id + '-note'">備註</label>
       <input
+        :id="id + '-note'"
         :value="modelValue.note"
         @input="patch({ note: ($event.target as HTMLInputElement).value })"
         placeholder="例如：午餐、捷運"
@@ -93,7 +102,7 @@ function onSubmit() {
     </div>
     <div class="row">
       <button type="button" class="btn ghost grow" @click="$emit('cancel')">取消</button>
-      <button type="submit" class="btn accent grow">{{ submitLabel }}</button>
+      <button type="submit" class="btn accent grow" :disabled="disabled">{{ submitLabel }}</button>
     </div>
   </form>
 </template>

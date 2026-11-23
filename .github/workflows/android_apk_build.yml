@@ -138,7 +138,7 @@ jobs:
           rm -f "$zip.part"
           echo "::error::Official Gradle distribution unavailable after 6 bounded attempts"; exit 1
 
-      - name: Build web app
+      - name: Test and build web app
         working-directory: app
         env:
           # Optional. Build still succeeds when unset; the app then explains that Google sign-in is not configured.
@@ -146,6 +146,8 @@ jobs:
         run: |
           set -euo pipefail
           npm ci
+          npm run typecheck
+          npm test
           npm run build
 
       - name: Install JS dependencies and sync Capacitor
