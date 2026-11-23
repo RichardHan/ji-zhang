@@ -1,83 +1,54 @@
-import { DEFAULT_MODEL, EXPENSE_CATEGORIES, FALLBACK_MODEL, INCOME_CATEGORIES } from '../constants'
-import { addDaysISO, todayISO } from '../dates'
-import type { DraftTransaction, TxType } from '../types'
+import type { ModelSelectionMode } from '../types'
+import { todayISO } from '../dates'
+import type { AiProvider, MonthInsightInput, ParseResult } from './types'
+import { draftsFromModelText, resizeImageDataUrl, textSystemPrompt, visionSystemPrompt } from './parse'
+import { resolveModelCandidates, type ModelKind } from './openrouter-models'
 
 const OPENROUTER = 'https://openrouter.ai/api/v1/chat/completions'
 
-export interface ParseResult {
-  transactions: DraftTransaction[]
-  modelUsed: string
+type ChatContent = string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>
+
+export interface OpenRouterSettings {
+  apiKey: string
+  textModelMode: ModelSelectionMode
+  visionModelMode: ModelSelectionMode
+  textModel: string
+  visionModel: string
 }
 
-function systemPrompt(today: string): string {
-  return `你是記帳助手。使用者會用繁體中文說出一筆或多筆收支（例如「午餐 120 信用卡」「昨天晚餐 350 搭車 180」）。
-今天是 ${today}（Asia/Taipei）。「昨天」「前天」「上週五」等相對日期請換算成 YYYY-MM-DD。
-請只輸出一個 JSON 物件，格式如下：
-{"transactions":[{"date":"YYYY-MM-DD","amount":120,"category":"餐飲","account":"信用卡","note":"午餐","type":"支出"}]}
-規則：
-- type 只能是「支出」或「收入」。沒說就是支出。
-- amount 是正數數字，不要貨幣符號。同一句裡的多筆都要拆出來。
-- category 支出優先從：${EXPENSE_CATEGORIES.join('、')}；收入優先從：${INCOME_CATEGORIES.join('、')}。無法判斷時用「其他」。
-- account 常見值：現金、信用卡、金融卡、行動支付、轉帳、其他。沒提到就留空字串。
-- note 用簡短中文（例如「午餐」），不要重複金額。
-- 不要輸出註解或 markdown。`
+interface HttpError extends Error {
+  status?: number
 }
 
-function extractJson(text: string): unknown {
-  const trimmed = text.trim()
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
-  const raw = fenced ? fenced[1].trim() : trimmed
-  const start = raw.indexOf('{')
-  const end = raw.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error('AI 回傳的內容不是 JSON')
-  }
-  return JSON.parse(raw.slice(start, end + 1))
+function asHttpError(message: string, status?: number): HttpError {
+  const error = new Error(message) as HttpError
+  error.status = status
+  return error
 }
 
-function normalizeTx(raw: Record<string, unknown>, today: string): DraftTransaction | null {
-  const amount = Number(raw.amount)
-  if (!Number.isFinite(amount) || amount <= 0) return null
-  let date = String(raw.date ?? today).trim()
-  if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(date)) {
-    const [y, m, d] = date.split('/')
-    date = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = today
-  const type: TxType = String(raw.type ?? '').trim() === '收入' ? '收入' : '支出'
-  return {
-    date,
-    amount: Math.round(amount),
-    category: String(raw.category ?? '其他').trim() || '其他',
-    account: String(raw.account ?? '').trim(),
-    note: String(raw.note ?? '').trim(),
-    type,
-  }
-}
-
-async function complete(
-  apiKey: string,
-  model: string,
-  userText: string,
-  today: string,
-  useJsonFormat: boolean,
-): Promise<string> {
+async function complete(options: {
+  apiKey: string
+  model: string
+  system: string
+  user: ChatContent
+  useJsonFormat: boolean
+}): Promise<string> {
   const body: Record<string, unknown> = {
-    model,
+    model: options.model,
     messages: [
-      { role: 'system', content: systemPrompt(today) },
-      { role: 'user', content: userText },
+      { role: 'system', content: options.system },
+      { role: 'user', content: options.user },
     ],
     temperature: 0.2,
     max_tokens: 1200,
   }
-  if (useJsonFormat) {
+  if (options.useJsonFormat) {
     body.response_format = { type: 'json_object' }
   }
   const res = await fetch(OPENROUTER, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${options.apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'https://github.com/RichardHan/ji-zhang',
       'X-Title': 'ji-zhang',
@@ -92,9 +63,7 @@ async function complete(
     } catch {
       detail = await res.text().catch(() => '')
     }
-    const error = new Error(detail || `OpenRouter 請求失敗（${res.status}）`) as Error & { status?: number }
-    error.status = res.status
-    throw error
+    throw asHttpError(detail || `OpenRouter 請求失敗（${res.status}）`, res.status)
   }
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[]
@@ -102,89 +71,128 @@ async function complete(
   return data.choices?.[0]?.message?.content ?? ''
 }
 
-async function tryModel(apiKey: string, model: string, userText: string, today: string): Promise<string> {
+function isRetriableStatus(status?: number): boolean {
+  if (!status) return true
+  return status === 429 || status >= 500
+}
+
+async function tryModel(
+  apiKey: string,
+  model: string,
+  system: string,
+  user: ChatContent,
+): Promise<string> {
   try {
-    return await complete(apiKey, model, userText, today, true)
+    return await complete({ apiKey, model, system, user, useJsonFormat: true })
   } catch (err) {
-    const status = (err as { status?: number }).status
+    const status = (err as HttpError).status
     if (status && status >= 400 && status < 500 && status !== 429) {
-      return await complete(apiKey, model, userText, today, false)
+      return await complete({ apiKey, model, system, user, useJsonFormat: false })
     }
     throw err
   }
 }
 
-export async function parseTransactionsWithAI(
-  apiKey: string,
-  preferredModel: string,
-  userText: string,
-): Promise<ParseResult> {
-  if (!apiKey.trim()) {
+async function runWithCandidates(
+  settings: OpenRouterSettings,
+  kind: ModelKind,
+  system: string,
+  user: ChatContent,
+  parse: (content: string) => ParseResult['transactions'] | string,
+): Promise<{ value: ParseResult['transactions'] | string; modelUsed: string }> {
+  if (!settings.apiKey.trim()) {
     throw new Error('請先在設定裡填入 OpenRouter API 金鑰。')
   }
-  const text = userText.trim()
-  if (!text) {
-    throw new Error('請先輸入要記的內容，例如「午餐 120 信用卡」。')
-  }
-  const today = todayISO()
-  const primary = preferredModel.trim() || DEFAULT_MODEL
-  const models: string[] = []
-  for (const id of [primary, FALLBACK_MODEL, DEFAULT_MODEL]) {
-    if (!models.includes(id)) models.push(id)
-  }
-
+  const mode = kind === 'vision' ? settings.visionModelMode : settings.textModelMode
+  const manualId = kind === 'vision' ? settings.visionModel : settings.textModel
+  const { ids } = await resolveModelCandidates(kind, mode, manualId)
   let lastError: Error | null = null
-  for (const model of models) {
+  for (const model of ids) {
     try {
-      const content = await tryModel(apiKey, model, text, today)
-      const parsed = extractJson(content) as { transactions?: Record<string, unknown>[] }
-      const list = Array.isArray(parsed.transactions) ? parsed.transactions : []
-      const transactions = list
-        .map((item) => normalizeTx(item, today))
-        .filter((t): t is DraftTransaction => t !== null)
-      if (transactions.length === 0) {
-        throw new Error('AI 沒有解析出任何一筆帳，請改一下說法或改用手動記帳。')
-      }
-      for (const t of transactions) {
-        if (t.date === '昨天') t.date = addDaysISO(today, -1)
-        if (t.date === '前天') t.date = addDaysISO(today, -2)
-      }
-      return { transactions, modelUsed: model }
+      const content = await tryModel(settings.apiKey, model, system, user)
+      return { value: parse(content), modelUsed: model }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
+      const status = (err as HttpError).status
+      if (mode === 'manual') break
+      if (!isRetriableStatus(status)) {
+        // 400-class model errors (not found / not allowed): try the next free model.
+        continue
+      }
     }
   }
   throw lastError ?? new Error('AI 解析失敗')
 }
 
-export async function monthlyInsight(
-  apiKey: string,
-  model: string,
-  summary: {
-    month: string
-    income: number
-    expense: number
-    byCategory: { category: string; amount: number }[]
-  },
-): Promise<string> {
-  if (!apiKey.trim()) {
-    throw new Error('請先在設定裡填入 OpenRouter API 金鑰。')
+export class OpenRouterProvider implements AiProvider {
+  readonly id = 'openrouter' as const
+
+  constructor(private readonly settings: OpenRouterSettings) {}
+
+  async isAvailable(): Promise<boolean> {
+    return this.settings.apiKey.trim().length > 0
   }
-  const lines = summary.byCategory
-    .map((c) => `${c.category} ${Math.round(c.amount)} 元`)
-    .join('、')
-  const prompt = `用繁體中文寫一段不超过 80 字的記帳觀察，語氣平實、不要標題。資料：${summary.month} 支出 ${Math.round(summary.expense)} 元，收入 ${Math.round(summary.income)} 元。支出分類：${lines || '無'}。不要建議投資商品。`
-  const primary = model.trim() || DEFAULT_MODEL
-  const models = primary === FALLBACK_MODEL ? [primary, DEFAULT_MODEL] : [primary, FALLBACK_MODEL]
-  let lastError: Error | null = null
-  for (const m of models) {
-    try {
-      const content = await complete(apiKey, m, prompt, todayISO(), false)
-      const text = content.trim().replace(/^```[\s\S]*?```$/g, '').trim()
-      if (text) return text
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
+
+  async parseText(input: string): Promise<ParseResult> {
+    const text = input.trim()
+    if (!text) {
+      throw new Error('請先輸入要記的內容，例如「午餐 120 信用卡」。')
+    }
+    const today = todayISO()
+    const result = await runWithCandidates(
+      this.settings,
+      'text',
+      textSystemPrompt(today),
+      text,
+      (content) => draftsFromModelText(content, today),
+    )
+    return {
+      transactions: result.value as ParseResult['transactions'],
+      modelUsed: result.modelUsed,
+      provider: 'openrouter',
     }
   }
-  throw lastError ?? new Error('無法產生分析')
+
+  async parseImage(imageDataUrl: string, hint = ''): Promise<ParseResult> {
+    if (!imageDataUrl) {
+      throw new Error('請先選取收據或電子發票的照片。')
+    }
+    const today = todayISO()
+    const image = await resizeImageDataUrl(imageDataUrl)
+    const text = hint.trim() || '請解析這張收據或電子發票。'
+    const result = await runWithCandidates(
+      this.settings,
+      'vision',
+      visionSystemPrompt(today),
+      [
+        { type: 'text', text },
+        { type: 'image_url', image_url: { url: image } },
+      ],
+      (content) => draftsFromModelText(content, today),
+    )
+    return {
+      transactions: result.value as ParseResult['transactions'],
+      modelUsed: result.modelUsed,
+      provider: 'openrouter',
+    }
+  }
+
+  async monthlyInsight(summary: MonthInsightInput): Promise<string> {
+    const lines = summary.byCategory
+      .map((c) => `${c.category} ${Math.round(c.amount)} 元`)
+      .join('、')
+    const prompt = `用繁體中文寫一段不超过 80 字的記帳觀察，語氣平實、不要標題。資料：${summary.month} 支出 ${Math.round(summary.expense)} 元，收入 ${Math.round(summary.income)} 元。支出分類：${lines || '無'}。不要建議投資商品。`
+    const result = await runWithCandidates(
+      this.settings,
+      'text',
+      '你是記帳助手，只用繁體中文回答。',
+      prompt,
+      (content) => {
+        const text = content.trim().replace(/^```[\s\S]*?```$/g, '').trim()
+        if (!text) throw new Error('無法產生分析')
+        return text
+      },
+    )
+    return result.value as string
+  }
 }

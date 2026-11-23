@@ -1,6 +1,6 @@
 # 記帳 Android APK
 
-從 2.0 起，這個 App 不再連到自架的 ezBookkeeping 伺服器。帳目寫進你自己的 Google 試算表，AI 記帳透過 [OpenRouter](https://openrouter.ai/) 的免費模型。畫面是 `app/` 裡的 Vue 網頁，由 `android-shell/` 的 Capacitor 包裝成 APK。應用程式 ID 仍是 `com.richardhan.jizhang`，可直接覆蓋安裝先前的版本。
+從 2.0 起，這個 App 不再連到自架的 ezBookkeeping 伺服器。帳目寫進你自己的 Google 試算表，AI 記帳預設透過 [OpenRouter](https://openrouter.ai/) 自動選免費模型，也可以改選付費模型或（開發中）本機模型。畫面是 `app/` 裡的 Vue 網頁，由 `android-shell/` 的 Capacitor 包裝成 APK。應用程式 ID 仍是 `com.richardhan.jizhang`，可直接覆蓋安裝先前的版本。
 
 ezBookkeeping 的原始碼還留在 repo 根目錄，只是當參考，App 執行時不會用到它。
 
@@ -81,7 +81,7 @@ SHA-1 是公開的憑證指紋，不是金鑰本身。若以後改用正式簽�
 2. 安裝 App、完成 Google 登入並選好試算表後，打開 **設定**，把金鑰貼上並儲存。
 3. 金鑰只存在這台手機（Capacitor Preferences），不會進 git，也不要傳給任何人。
 
-預設模型是免費的 `google/gemma-4-26b-a4b-it:free`；若該模型忙碌或失敗，會自動改試 `inclusionai/ling-3.2-flash:free`。可在設定裡改模型。
+預設會自動選免費模型（文字與視覺分開挑選），失敗或被限速時改試下一個免費模型。也可以在設定裡改為自行指定任何免費或付費模型，清單來自 OpenRouter 並顯示價格。本機離線模型的說明見 [local-ai.md](local-ai.md)。
 
 ## 第一次使用
 
@@ -89,7 +89,7 @@ SHA-1 是公開的憑證指紋，不是金鑰本身。若以後改用正式簽�
 2. 按「使用 Google 登入」，允許試算表權限。
 3. 選擇「建立新的記帳試算表」（會在你的 Google Drive 建立 `ji-zhang 記帳`，工作表名稱是「交易」），或貼上已有試算表的連結。
 4. 在設定裡貼上 OpenRouter 金鑰。
-5. 在「記一筆」輸入例如「午餐 120 信用卡」，確認後寫入試算表；也可以改用手動表單。
+5. 在「記一筆」輸入例如「午餐 120 信用卡」，或選取收據／電子發票照片，確認後寫入試算表；也可以改用手動表單。
 6. 「月報」會依月份加總支出／收入，並依分類畫出長條圖，可選再用 AI 寫一段觀察。
 
 欄位為：日期、金額、類別、帳戶/付款方式、備註、類型（支出/收入）、建立時間、id。你也可以直接在 Google 試算表裡查看或備份。

@@ -13,16 +13,25 @@ export const HEADERS = [
   'id',
 ] as const
 
+/** Hardcoded last-resort IDs if the OpenRouter catalog cannot be fetched. */
 export const DEFAULT_MODEL = 'google/gemma-4-26b-a4b-it:free'
 export const FALLBACK_MODEL = 'inclusionai/ling-3.2-flash:free'
 
-export const FREE_MODELS: { id: string; label: string }[] = [
-  { id: DEFAULT_MODEL, label: 'Gemma 4 26B（預設，免費）' },
-  { id: FALLBACK_MODEL, label: 'Ling 3.2 Flash（備用，免費）' },
-  { id: 'google/gemma-4-31b-it:free', label: 'Gemma 4 31B（免費）' },
-  { id: 'baidu/ernie-5.5-flash-preview:free', label: 'ERNIE 5.5 Flash（免費，中文）' },
-  { id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', label: 'Nemotron 3 Nano Omni（免費）' },
-]
+/** Preferred free models, tried first when auto-pick is on (text). */
+export const PREFERRED_FREE_TEXT_MODELS = [
+  DEFAULT_MODEL,
+  FALLBACK_MODEL,
+  'baidu/ernie-5.5-flash-preview:free',
+  'google/gemma-4-31b-it:free',
+] as const
+
+/** Preferred free models, tried first when auto-pick is on (vision / receipts). */
+export const PREFERRED_FREE_VISION_MODELS = [
+  DEFAULT_MODEL,
+  FALLBACK_MODEL,
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+] as const
 
 export const EXPENSE_CATEGORIES = [
   '餐飲',

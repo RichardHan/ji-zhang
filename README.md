@@ -1,10 +1,12 @@
 # ji-zhang（記帳）
 
-這是一個不需自架伺服器的記帳 App：帳目存在你自己的 Google 試算表，AI 記帳使用 [OpenRouter](https://openrouter.ai/) 的免費模型。Android APK 由 Capacitor 包裝 `app/` 裡的 Vue 3 介面，應用程式 ID 為 `com.richardhan.jizhang`。
+這是一個不需自架伺服器的記帳 App：帳目存在你自己的 Google 試算表，AI 記帳預設使用 [OpenRouter](https://openrouter.ai/) 自動選免費模型，也可以改選付費模型或（開發中）本機模型。Android APK 由 Capacitor 包裝 `app/` 裡的 Vue 3 介面，應用程式 ID 為 `com.richardhan.jizhang`。
 
 - 用 Google 登入，新建或指定一張名為「ji-zhang 記帳」的試算表
-- 輸入「午餐 120 信用卡」或「昨天晚餐 350 搭車 180」，AI 解析後請你確認再寫入
+- 輸入「午餐 120 信用卡」或「昨天晚餐 350 搭車 180」，或選取收據／電子發票照片，AI 解析後請你確認再寫入
 - 也提供手動記帳、明細修改／刪除，以及本月收支與分類圖表
+- OpenRouter 預設會自動選免費模型（文字與視覺分開）；也可在設定裡改選任何免費或付費模型
+- 本機（離線）文字與視覺模型正在接線，設定裡可先看到下載與來源選項
 - OpenRouter 金鑰只存在手機裡，不會進這個 repo
 
 完整的 Google Cloud、OAuth、GitHub 變數與安裝步驟，請看 **[docs/android-apk.md](docs/android-apk.md)**。
@@ -17,7 +19,7 @@
 4. 把 Web 用戶端 ID 設成 GitHub Actions variable（或 secret）`GOOGLE_WEB_CLIENT_ID`，再跑一次 APK 建置
 5. 到 [OpenRouter](https://openrouter.ai/keys) 申請金鑰，在 App 的設定頁貼上
 
-預設 AI 模型：`google/gemma-4-26b-a4b-it:free`（備用：`inclusionai/ling-3.2-flash:free`）。
+AI 預設為「自動選 OpenRouter 免費模型」，不必先挑模型；設定裡可以改為指定任何免費或付費模型，或改用本機模型（開發中）。詳見 [docs/local-ai.md](docs/local-ai.md)。
 
 這個 repo 仍保留 [ezBookkeeping](https://github.com/mayswind/ezbookkeeping) 的原始碼（MIT）作為參考，位於根目錄；目前上架的 App 已改走 Google Sheets，不再需要 ezBookkeeping 伺服器。
 

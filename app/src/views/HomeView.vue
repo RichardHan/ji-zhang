@@ -3,18 +3,21 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ConfirmTransactions from '../components/ConfirmTransactions.vue'
 import TransactionForm from '../components/TransactionForm.vue'
-import { parseTransactionsWithAI } from '../ai/openrouter'
+import { parseImage, parseText } from '../ai'
 import { useApp } from '../composables/useApp'
 import { formatTWD, todayISO } from '../dates'
 import type { DraftTransaction } from '../types'
 
-const { state, addDrafts } = useApp()
+const { state, addDrafts, aiSettings } = useApp()
 const router = useRouter()
 const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
 const drafts = ref<DraftTransaction[]>([])
 const modelUsed = ref('')
+const photoName = ref('')
+const photoDataUrl = ref('')
+const photoInput = ref<HTMLInputElement | null>(null)
 const editingIndex = ref<number | null>(null)
 const editDraft = ref<DraftTransaction>(emptyDraft())
 
@@ -29,14 +32,37 @@ function emptyDraft(): DraftTransaction {
   }
 }
 
+const canUseCloud = () => Boolean(state.openRouterKey)
+const canParse = () => state.aiProvider === 'local' || canUseCloud()
+
+function onPickPhoto(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  photoName.value = file.name
+  const reader = new FileReader()
+  reader.onload = () => {
+    photoDataUrl.value = typeof reader.result === 'string' ? reader.result : ''
+  }
+  reader.readAsDataURL(file)
+}
+
+function clearPhoto() {
+  photoName.value = ''
+  photoDataUrl.value = ''
+  if (photoInput.value) photoInput.value.value = ''
+}
+
 async function parse() {
   parseError.value = ''
   parsing.value = true
   drafts.value = []
   try {
-    const result = await parseTransactionsWithAI(state.openRouterKey, state.model, prompt.value)
+    const result = photoDataUrl.value
+      ? await parseImage(aiSettings(), photoDataUrl.value, prompt.value)
+      : await parseText(aiSettings(), prompt.value)
     drafts.value = result.transactions
-    modelUsed.value = result.modelUsed
+    modelUsed.value = `${result.provider === 'local' ? '本機' : 'OpenRouter'} · ${result.modelUsed}`
   } catch (err) {
     parseError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -51,6 +77,7 @@ async function confirm() {
     drafts.value = []
     prompt.value = ''
     modelUsed.value = ''
+    clearPhoto()
   } catch (err) {
     parseError.value = err instanceof Error ? err.message : String(err)
   }
@@ -75,20 +102,27 @@ const recent = () => state.transactions.slice(0, 5)
     <h1 class="page-title">記一筆</h1>
     <p class="page-sub">打一句話，例如「午餐 120 信用卡」或「昨天晚餐 350 搭車 180」。</p>
 
-    <div v-if="!state.openRouterKey" class="banner warn">
-      還沒有 OpenRouter 金鑰。可以先用手動記帳，或到
+    <div v-if="!canParse()" class="banner warn">
+      本機模型還沒就緒，也還沒有 OpenRouter 金鑰。可以先用手動記帳，或到
       <router-link to="/settings">設定</router-link>
-      貼上金鑰後再用 AI。
+      貼上金鑰（預設會自動選免費模型）。
     </div>
     <div v-if="parseError" class="banner error">{{ parseError }}</div>
 
     <div class="card stack ai-box">
       <div class="field">
         <label>用 AI 記帳</label>
-        <textarea v-model="prompt" placeholder="午餐 120 信用卡" :disabled="parsing" @keydown.ctrl.enter="parse" />
+        <textarea v-model="prompt" placeholder="午餐 120 信用卡，或先選收據照片再補充一句" :disabled="parsing" @keydown.ctrl.enter="parse" />
       </div>
-      <button class="btn accent block" :disabled="parsing || !prompt.trim() || !state.openRouterKey" @click="parse">
-        {{ parsing ? '解析中…' : '解析並預覽' }}
+      <input ref="photoInput" class="sr-only" type="file" accept="image/*" @change="onPickPhoto" />
+      <div class="row">
+        <button type="button" class="btn ghost grow" :disabled="parsing" @click="photoInput?.click()">選取收據照片</button>
+        <button v-if="photoDataUrl" type="button" class="btn ghost" :disabled="parsing" @click="clearPhoto">清除照片</button>
+      </div>
+      <p v-if="photoName" class="muted small">已選：{{ photoName }}</p>
+      <img v-if="photoDataUrl" class="receipt-thumb" :src="photoDataUrl" alt="收據預覽" />
+      <button class="btn accent block" :disabled="parsing || (!prompt.trim() && !photoDataUrl) || !canParse()" @click="parse">
+        {{ parsing ? '解析中…' : photoDataUrl ? '解析照片並預覽' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>
     </div>

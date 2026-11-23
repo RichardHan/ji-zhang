@@ -1,5 +1,4 @@
 import { computed, reactive } from 'vue'
-import { DEFAULT_MODEL } from '../constants'
 import { currentMonth, monthKey } from '../dates'
 import {
   googleConfigError,
@@ -18,7 +17,7 @@ import {
   updateTransaction,
 } from '../google/sheets'
 import { storage } from '../storage'
-import type { DraftTransaction, Transaction, UserProfile } from '../types'
+import type { AiProviderId, DraftTransaction, ModelSelectionMode, Transaction, UserProfile } from '../types'
 
 interface AppState {
   ready: boolean
@@ -29,7 +28,12 @@ interface AppState {
   spreadsheetId: string
   spreadsheetUrl: string
   openRouterKey: string
+  aiProvider: AiProviderId
+  textModelMode: ModelSelectionMode
+  visionModelMode: ModelSelectionMode
   model: string
+  visionModel: string
+  wifiOnlyDownload: boolean
   transactions: Transaction[]
   selectedMonth: string
 }
@@ -44,7 +48,12 @@ function createAppStore() {
     spreadsheetId: '',
     spreadsheetUrl: '',
     openRouterKey: '',
-    model: DEFAULT_MODEL,
+    aiProvider: 'auto',
+    textModelMode: 'auto-free',
+    visionModelMode: 'auto-free',
+    model: '',
+    visionModel: '',
+    wifiOnlyDownload: true,
     transactions: [],
     selectedMonth: currentMonth(),
   })
@@ -58,7 +67,12 @@ function createAppStore() {
   async function hydrate(): Promise<void> {
     state.error = ''
     state.openRouterKey = await storage.getOpenRouterKey()
-    state.model = (await storage.getModel()) || DEFAULT_MODEL
+    state.aiProvider = await storage.getAiProvider()
+    state.textModelMode = await storage.getTextModelMode()
+    state.visionModelMode = await storage.getVisionModelMode()
+    state.model = await storage.getModel()
+    state.visionModel = await storage.getVisionModel()
+    state.wifiOnlyDownload = await storage.getWifiOnlyDownload()
     state.spreadsheetId = await storage.getSpreadsheetId()
     state.spreadsheetUrl = await storage.getSpreadsheetUrl()
     const email = await storage.getEmail()
@@ -200,14 +214,53 @@ function createAppStore() {
     }
   }
 
-  async function saveSettings(next: { openRouterKey?: string; model?: string }): Promise<void> {
+  async function saveSettings(next: {
+    openRouterKey?: string
+    aiProvider?: AiProviderId
+    textModelMode?: ModelSelectionMode
+    visionModelMode?: ModelSelectionMode
+    model?: string
+    visionModel?: string
+    wifiOnlyDownload?: boolean
+  }): Promise<void> {
     if (next.openRouterKey !== undefined) {
       state.openRouterKey = next.openRouterKey
       await storage.setOpenRouterKey(next.openRouterKey)
     }
+    if (next.aiProvider !== undefined) {
+      state.aiProvider = next.aiProvider
+      await storage.setAiProvider(next.aiProvider)
+    }
+    if (next.textModelMode !== undefined) {
+      state.textModelMode = next.textModelMode
+      await storage.setTextModelMode(next.textModelMode)
+    }
+    if (next.visionModelMode !== undefined) {
+      state.visionModelMode = next.visionModelMode
+      await storage.setVisionModelMode(next.visionModelMode)
+    }
     if (next.model !== undefined) {
       state.model = next.model
       await storage.setModel(next.model)
+    }
+    if (next.visionModel !== undefined) {
+      state.visionModel = next.visionModel
+      await storage.setVisionModel(next.visionModel)
+    }
+    if (next.wifiOnlyDownload !== undefined) {
+      state.wifiOnlyDownload = next.wifiOnlyDownload
+      await storage.setWifiOnlyDownload(next.wifiOnlyDownload)
+    }
+  }
+
+  function aiSettings() {
+    return {
+      apiKey: state.openRouterKey,
+      aiProvider: state.aiProvider,
+      textModelMode: state.textModelMode,
+      visionModelMode: state.visionModelMode,
+      textModel: state.model,
+      visionModel: state.visionModel,
     }
   }
 
@@ -240,6 +293,7 @@ function createAppStore() {
     saveTransaction,
     removeTransaction,
     saveSettings,
+    aiSettings,
     signOut,
     disconnectSheet,
   }

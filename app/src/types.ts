@@ -1,5 +1,10 @@
 export type TxType = '支出' | '收入'
 
+export type AiProviderId = 'auto' | 'local' | 'openrouter'
+
+/** Default is auto-free: pick a live free OpenRouter model. Manual is an opt-in override. */
+export type ModelSelectionMode = 'auto-free' | 'manual'
+
 export interface Transaction {
   id: string
   date: string
@@ -29,7 +34,12 @@ export interface UserProfile {
 
 export interface AppSettings {
   openRouterKey: string
+  aiProvider: AiProviderId
+  textModelMode: ModelSelectionMode
+  visionModelMode: ModelSelectionMode
   model: string
+  visionModel: string
+  wifiOnlyDownload: boolean
   spreadsheetId: string
   spreadsheetUrl: string
 }
