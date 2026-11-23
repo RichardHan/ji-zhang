@@ -1,70 +1,33 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import ConfirmTransactions from '../components/ConfirmTransactions.vue'
-import TransactionForm from '../components/TransactionForm.vue'
 import { parseTransactionsWithAI } from '../ai/openrouter'
 import { useApp } from '../composables/useApp'
-import { formatTWD, todayISO } from '../dates'
-import type { DraftTransaction } from '../types'
+import { formatTWD } from '../dates'
 
-const { state, addDrafts } = useApp()
+const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
 const router = useRouter()
 const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
-const drafts = ref<DraftTransaction[]>([])
-const modelUsed = ref('')
-const editingIndex = ref<number | null>(null)
-const editDraft = ref<DraftTransaction>(emptyDraft())
-
-function emptyDraft(): DraftTransaction {
-  return {
-    date: todayISO(),
-    amount: 0,
-    category: '餐飲',
-    account: '',
-    note: '',
-    type: '支出',
-  }
-}
+const pendingCount = computed(() => pendingBatches.value.reduce((total, batch) => total + batch.drafts.length, 0))
 
 async function parse() {
+  if (parsing.value || reviewBusy.value || state.loading || !prompt.value.trim() || !state.openRouterKey) return
+  const book = reviewBook.value
   parseError.value = ''
   parsing.value = true
-  drafts.value = []
+
   try {
     const result = await parseTransactionsWithAI(state.openRouterKey, state.model, prompt.value)
-    drafts.value = result.transactions
-    modelUsed.value = result.modelUsed
+    await stageDrafts(result.transactions, { kind: 'ai-text', modelUsed: result.modelUsed }, book)
+    prompt.value = ''
+    if (router.currentRoute.value.name === 'home') await router.push({ name: 'review' })
   } catch (err) {
     parseError.value = err instanceof Error ? err.message : String(err)
   } finally {
     parsing.value = false
   }
-}
-
-async function confirm() {
-  parseError.value = ''
-  try {
-    await addDrafts(drafts.value)
-    drafts.value = []
-    prompt.value = ''
-    modelUsed.value = ''
-  } catch (err) {
-    parseError.value = err instanceof Error ? err.message : String(err)
-  }
-}
-
-function startEdit(index: number) {
-  editingIndex.value = index
-  editDraft.value = { ...drafts.value[index] }
-}
-
-function applyEdit() {
-  if (editingIndex.value === null) return
-  drafts.value[editingIndex.value] = { ...editDraft.value }
-  editingIndex.value = null
 }
 
 const recent = () => state.transactions.slice(0, 5)
@@ -81,31 +44,18 @@ const recent = () => state.transactions.slice(0, 5)
       貼上金鑰後再用 AI。
     </div>
     <div v-if="parseError" class="banner error">{{ parseError }}</div>
+    <p><router-link to="/review">待確認清單（{{ pendingCount }} 筆）</router-link></p>
 
     <div class="card stack ai-box">
       <div class="field">
-        <label>用 AI 記帳</label>
-        <textarea v-model="prompt" placeholder="午餐 120 信用卡" :disabled="parsing" @keydown.ctrl.enter="parse" />
+        <label for="ai-transaction-input">用 AI 記帳（TWD）</label>
+        <textarea id="ai-transaction-input" v-model="prompt" placeholder="午餐 120 信用卡" :disabled="parsing" @keydown.ctrl.enter.prevent="parse" />
       </div>
-      <button class="btn accent block" :disabled="parsing || !prompt.trim() || !state.openRouterKey" @click="parse">
+      <p class="muted small" style="margin: 0">按下解析會將文字傳給 OpenRouter；你確認後才會寫入試算表。</p>
+      <button class="btn accent block" :disabled="parsing || reviewBusy || state.loading || !prompt.trim() || !state.openRouterKey" @click="parse">
         {{ parsing ? '解析中…' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>
-    </div>
-
-    <div v-if="drafts.length && editingIndex === null" style="margin-top: 16px">
-      <ConfirmTransactions
-        :drafts="drafts"
-        :model-used="modelUsed"
-        @confirm="confirm"
-        @cancel="drafts = []"
-        @edit="startEdit"
-      />
-    </div>
-
-    <div v-if="editingIndex !== null" class="card" style="margin-top: 16px">
-      <h3>修改這一筆</h3>
-      <TransactionForm v-model="editDraft" submit-label="套用" @submit="applyEdit" @cancel="editingIndex = null" />
     </div>
 
     <div style="margin-top: 24px">
