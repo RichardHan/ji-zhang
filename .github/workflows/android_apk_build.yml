@@ -161,10 +161,10 @@ jobs:
           npm ci
           npx cap sync android
 
-      - name: Build debug APK
+      - name: Test Android code and build debug APK
         working-directory: android-shell/android
         run: >-
-          ./gradlew --no-daemon :app:assembleDebug
+          ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
           -Dorg.gradle.internal.repository.max.tentatives=6
           -Dorg.gradle.internal.repository.initial.backoff=5000
           -Dorg.gradle.internal.http.connectionTimeout=60000

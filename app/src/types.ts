@@ -22,7 +22,7 @@ export interface DraftTransaction {
 }
 
 export interface ReviewSource {
-  kind: 'manual' | 'ai-text'
+  kind: 'manual' | 'ai-text' | 'voice'
   modelUsed?: string
   eventId?: string
 }
