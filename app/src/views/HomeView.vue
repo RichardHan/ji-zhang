@@ -5,6 +5,7 @@ import { parseTransactionsWithAI } from '../ai/openrouter'
 import { useApp } from '../composables/useApp'
 import { formatTWD } from '../dates'
 import { bookkeepingSpeech, canUseBookkeepingSpeech } from '../speech'
+import ReceiptPhotoInput from '../components/ReceiptPhotoInput.vue'
 import { storage } from '../storage'
 
 const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
@@ -190,6 +191,8 @@ const recent = () => state.transactions.slice(0, 5)
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>
     </div>
+
+    <ReceiptPhotoInput />
 
     <div style="margin-top: 24px">
       <div class="row space">

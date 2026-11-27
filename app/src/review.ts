@@ -1,4 +1,4 @@
-import type { DraftTransaction } from './types'
+import type { DraftTransaction, ReviewSource } from './types'
 
 export function validReviewDate(date: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith('0000')) return false
@@ -10,10 +10,11 @@ export function validReviewAmount(amount: number): boolean {
   return Number.isSafeInteger(amount) && amount > 0
 }
 
-export function missingDraftFields(draft: DraftTransaction): string[] {
+export function missingDraftFields(draft: DraftTransaction, source?: ReviewSource['kind']): string[] {
   const missing: string[] = []
   if (!validReviewDate(draft.date)) missing.push('日期')
   if (!validReviewAmount(draft.amount)) missing.push('TWD 金額')
+  if (source === 'photo' && !draft.note.trim()) missing.push('商家（備註）')
   return missing
 }
 
