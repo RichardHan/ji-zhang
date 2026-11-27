@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import TransactionForm from '../components/TransactionForm.vue'
 import { useApp } from '../composables/useApp'
 import { invoiceCandidate, invoiceEventId, type InvoiceCandidate, type InvoiceInput } from '../invoice'
-import { receiptPlugin, nativeReceipts, sharedInvoice } from '../receiptInput'
+import { receiptPlugin, nativeReceipts, sharedInvoice, sharedMail } from '../receiptInput'
 import { missingDraftFields, validReviewDate } from '../review'
 
 const { checkInvoiceImport, stageDrafts, reviewBook, reviewBusy, state } = useApp()
@@ -14,6 +14,7 @@ const candidate = ref<InvoiceCandidate>()
 const error = ref('')
 const duplicate = ref('')
 const reading = ref(false)
+const receivedText = ref('')
 let mounted = true
 onUnmounted(() => { mounted = false })
 
@@ -37,11 +38,17 @@ function read(input: InvoiceInput) {
   }
 }
 
+function openSharedMail() {
+  sharedMail.value = { text: receivedText.value }
+  void router.push({ name: 'mail' })
+}
+
 function receiveShare() {
   const share = sharedInvoice.value
   if (!share) return
   sharedInvoice.value = undefined
   pasted.value = share.text ?? ''
+  receivedText.value = pasted.value
   if (share.error) error.value = share.error
   else read({ text: pasted.value })
 }
@@ -90,6 +97,7 @@ async function stage() {
   <div class="page stack">
     <h1 class="page-title">匯入電子發票／收據</h1>
     <p class="page-sub">一次匯入一張，在裝置上讀取內容。核對後加入待確認清單，再確認入帳。</p>
+    <button v-if="receivedText" class="btn ghost" @click="openSharedMail">用郵件匯入處理這段分享文字</button>
     <button v-if="sharedInvoice" class="btn ghost" :disabled="reading || reviewBusy" @click="receiveShare">讀取新分享的收據</button>
     <p v-if="duplicate" class="banner warn" role="status">{{ duplicate }}</p>
     <div v-if="error" class="banner error" role="alert">{{ error }}</div>

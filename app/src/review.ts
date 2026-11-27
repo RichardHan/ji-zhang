@@ -14,7 +14,7 @@ export function missingDraftFields(draft: DraftTransaction, source?: ReviewSourc
   const missing: string[] = []
   if (!validReviewDate(draft.date)) missing.push('日期')
   if (!validReviewAmount(draft.amount)) missing.push('TWD 金額')
-  if ((source === 'photo' || source === 'invoice') && !draft.note.trim()) missing.push('商家（備註）')
+  if ((source === 'photo' || source === 'invoice' || source === 'mail-invoice' || source === 'mail-card') && !draft.note.trim()) missing.push('商家（備註）')
   return missing
 }
 

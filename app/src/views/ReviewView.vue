@@ -12,6 +12,8 @@ const sourceLabels = {
   voice: '語音輸入',
   photo: '收據照片',
   invoice: '電子發票／收據',
+  'mail-invoice': '郵件發票',
+  'mail-card': '信用卡通知',
 } satisfies Record<ReviewSource['kind'], string>
 
 const {
@@ -116,6 +118,8 @@ function stopRetry(id: string) {
     <section v-for="{ batch, rows, hasDuplicates, needsInput } in batches" :key="batch.id" class="card stack">
       <h2 style="margin: 0; font-size: 1rem">{{ sourceLabels[batch.source] }}</h2>
       <small v-if="batch.invoiceNumber">發票號碼 {{ batch.invoiceNumber }}</small>
+      <small v-if="batch.mailDetail">{{ batch.mailDetail }}</small>
+      <p v-if="batch.source === 'mail-invoice' && !batch.submitted" class="banner warn">請核對付款紀錄，已付款再確認入帳。</p>
       <details v-if="receiptPreviews.has(batch.id)" open>
         <summary>核對收據照片</summary>
         <img :src="receiptPreviews.get(batch.id)" alt="本次收據照片" style="width: 100%; max-height: 42vh; object-fit: contain" />
@@ -154,7 +158,7 @@ function stopRetry(id: string) {
         </div>
       </div>
       <button type="button" class="btn accent block" :disabled="busy || needsInput || !!editing" @click="confirmBatch(batch.id)">
-        {{ batch.submitted ? '重試確認' : hasDuplicates ? '保留並確認入帳' : '確認入帳' }}
+        {{ batch.submitted ? '重試確認' : batch.source === 'mail-invoice' ? '已付款，確認入帳' : hasDuplicates ? '保留並確認入帳' : '確認入帳' }}
       </button>
       <button v-if="batch.submitted" type="button" class="btn ghost block" :disabled="busy" @click="stopRetry(batch.id)">
         停止重試

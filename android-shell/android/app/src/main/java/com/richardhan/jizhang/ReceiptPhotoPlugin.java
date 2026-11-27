@@ -2,6 +2,8 @@ package com.richardhan.jizhang;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Process;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
@@ -24,6 +26,7 @@ import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -33,14 +36,79 @@ public final class ReceiptPhotoPlugin extends Plugin {
 
     @Override
     protected void handleOnNewIntent(Intent intent) {
-        if (!Intent.ACTION_SEND.equals(intent.getAction()) || !"text/plain".equals(intent.getType())) return;
+        if (!Intent.ACTION_SEND.equals(intent.getAction())) return;
+        if ("message/rfc822".equals(intent.getType())) {
+            Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            intent.removeExtra(Intent.EXTRA_STREAM);
+            execute(() -> {
+                JSObject share = new JSObject().put("mail", true);
+                try {
+                    if (!(stream instanceof Uri)) throw new IOException();
+                    Uri uri = (Uri) stream;
+                    if (!"content".equals(uri.getScheme()) || uri.getAuthority() == null || uri.getAuthority().contains("@")
+                            || (getContext().getPackageName() + ".fileprovider").equals(uri.getAuthority())
+                            || getContext().checkUriPermission(uri, Process.myPid(), Process.myUid(),
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION) != PackageManager.PERMISSION_GRANTED) throw new IOException();
+                    try (InputStream in = getContext().getContentResolver().openInputStream(uri)) {
+                        if (in == null) throw new IOException();
+                        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                        byte[] chunk = new byte[8192];
+                        int n;
+                        while ((n = in.read(chunk)) != -1) {
+                            if (bytes.size() + n > 12 * 1024 * 1024) throw new IOException();
+                            bytes.write(chunk, 0, n);
+                        }
+                        share.put("eml", Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP));
+                    }
+                } catch (IOException | RuntimeException e) {
+                    share.put("error", "無法開啟分享的郵件，請選取 12 MB 以內的 .eml 或分享內文。");
+                }
+                notifyListeners("sharedInvoice", share, true);
+            });
+            return;
+        }
+        if (!"text/plain".equals(intent.getType())) return;
         CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
         if (text == null) return;
         intent.removeExtra(Intent.EXTRA_TEXT);
         JSObject shared = new JSObject();
+        String subject = intent.getStringExtra(Intent.EXTRA_SUBJECT);
+        if (subject != null) shared.put("subject", subject.substring(0, Math.min(subject.length(), 1024)));
         if (text.length() > InvoiceDocument.MAX_TEXT) shared.put("error", "分享文字過長，請一次匯入一張發票。");
         else shared.put("text", text.toString());
         getBridge().execute(() -> notifyListeners("sharedInvoice", shared, true));
+    }
+
+    @PluginMethod
+    public void readMailAttachment(PluginCall call) {
+        String data = call.getString("data", "");
+        String type = call.getString("mimeType", "");
+        if (data.length() > 16 * 1024 * 1024 || !("application/pdf".equals(type) || type.startsWith("image/"))) {
+            call.reject("請選取 PDF 或圖片附件（上限 12 MB）。");
+            return;
+        }
+        File file = null;
+        try {
+            file = File.createTempFile("mail-receipt-", ".tmp", getContext().getCacheDir());
+            try (FileOutputStream out = new FileOutputStream(file)) {
+                out.write(Base64.decode(data, Base64.DEFAULT));
+            }
+            Uri uri = Uri.fromFile(file);
+            if ("application/pdf".equals(type)) {
+                call.resolve(InvoiceDocument.read(getContext().getContentResolver(), uri, type));
+            } else {
+                Bitmap bitmap = decode(uri);
+                try {
+                    call.resolve(InvoiceDocument.readImage(bitmap));
+                } finally {
+                    bitmap.recycle();
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            call.reject("無法讀取附件。若有密碼，請改用可閱讀的收據或郵件文字。");
+        } finally {
+            if (file != null) file.delete();
+        }
     }
 
     private File captureFile() {

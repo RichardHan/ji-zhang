@@ -275,3 +275,49 @@ test('numbered invoices deduplicate across receipt text, QR, reload and committe
   assert.notEqual(invoiceEventId(parsed.number, '2013-07-01'), source.eventId)
   assert.equal(invoiceEventId('', parsed.draft.date), undefined)
 })
+
+test('a bill stays a summary, including a card statement with itemized purchases', async () => {
+  const { parseMail } = await server.ssrLoadModule('/src/mail.ts')
+  const parsed = parseMail('帳單期間：2026/10/01 至 2026/10/31\n本期應繳金額：NT$ 1,250\n繳款截止日：2026/11/20\n交易金額：TWD 120\n商家：海山茶舖', '信用卡月結帳單')
+  assert.deepEqual(parsed, { kind: 'bill', period: '2026/10/01 至 2026/10/31', due: '2026-11-20', money: 'NT$ 1,250' })
+  assert.equal(ledger.get(book).rows.length, 0)
+})
+
+test('mail card purchase, reversal, declined transaction and foreign refund have different outcomes', async () => {
+  const { parseMail } = await server.ssrLoadModule('/src/mail.ts')
+  const source = '特店名稱：海山茶舖\n交易時間：2026/11/27 09:41\n交易金額：NT$ 120'
+  const purchase = parseMail(source, '信用卡消費通知')
+  assert.deepEqual([purchase.action, purchase.draft.note, purchase.draft.amount, purchase.draft.date, purchase.time],
+    ['purchase', '海山茶舖', 120, '2026-11-27', '09:41'])
+  assert.equal(parseMail(source, '刷卡取消通知').draft, undefined)
+  assert.equal(parseMail(source + '\n本筆交易已取消', '刷卡通知').draft, undefined)
+  assert.equal(parseMail(source + '\n交易結果：未核准', '信用卡交易通知').draft, undefined)
+  const refund = parseMail(source.replace('NT$ 120', 'USD 3.25'), '信用卡退款通知')
+  assert.deepEqual([refund.action, refund.draft.type, refund.draft.amount, refund.money], ['refund', '收入', 0, 'USD 3.25'])
+  assert.equal(parseMail(source.replace('NT$ 120', '120'), '刷卡通知').draft.amount, 0)
+})
+
+test('an invoice attachment and a card notification meet in the review queue before any write', async () => {
+  const { parseMail } = await server.ssrLoadModule('/src/mail.ts')
+  const { readMailFile, readMailAttachment } = await server.ssrLoadModule('/src/mailFile.ts')
+  const attachment = '商家：海山茶舖\n發票號碼 AB-11223344\n2026/11/27\n實付 120'
+  const raw = ['Subject: Invoice', 'Message-ID: <fixture@example.test>', 'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary=parts', '', '--parts', 'Content-Type: text/plain', '', 'See attached.',
+    '--parts','Content-Type: text/plain; charset=UTF-8','Content-Disposition: attachment; filename="invoice.txt"',
+    'Content-Transfer-Encoding: base64','', Buffer.from(attachment).toString('base64'),'--parts--'].join('\r\n')
+  const mail = await readMailFile(new File([raw], 'invoice.eml'))
+  const invoice = parseMail(mail.text, mail.subject, await readMailAttachment(mail.attachments[0]))
+  const card = parseMail('交易時間：2026/11/27 09:41\n交易金額：TWD 120\n特店名稱：海山茶舖', '刷卡消費通知')
+  assert.equal(invoice.number, 'AB11223344')
+  const invoiceSource = { kind: 'mail-invoice', invoiceNumber: invoice.number, eventId: '2026/6/AB11223344' }
+  const id = await app.stageDrafts([invoice.draft], invoiceSource)
+  await assert.rejects(app.stageDrafts([invoice.draft], { ...invoiceSource, kind: 'invoice' }), /已在待確認清單/)
+  const cardId = await app.stageDrafts([card.draft], { kind: 'mail-card', eventId: 'card-message-1' })
+  assert.equal(app.pendingBatches.value.length, 2)
+  assert.equal(similarTransactionKey(invoice.draft), similarTransactionKey(card.draft))
+  assert.equal(ledger.get(book).rows.length, 0)
+  await app.discardPendingBatch(cardId)
+  await app.confirmPendingBatch(id)
+  assert.equal(ledger.get(book).rows.length, 1)
+  assert.ok(!JSON.stringify(ledger.get(book).rows).includes('fixture@example.test'))
+})
