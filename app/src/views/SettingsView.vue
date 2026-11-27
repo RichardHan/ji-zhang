@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { DEFAULT_MODEL, FALLBACK_MODEL, FREE_MODELS } from '../constants'
 import { useApp } from '../composables/useApp'
 
-const { state, saveSettings, signOut, disconnectSheet, changeSheet, configError } = useApp()
+const { state, reviewBusy, saveSettings, signOut, disconnectSheet, changeSheet, configError } = useApp()
 const router = useRouter()
 const isKnown = FREE_MODELS.some((m) => m.id === state.model)
 const keyInput = ref(state.openRouterKey)
@@ -70,7 +70,7 @@ async function onConnect() {
       <strong>Google 帳號</strong>
       <p class="small">{{ state.profile?.name || '未顯示名稱' }}</p>
       <p class="muted small">{{ state.profile?.email || '—' }}</p>
-      <button class="btn ghost" @click="onSignOut">登出</button>
+      <button class="btn ghost" :disabled="reviewBusy || state.loading" @click="onSignOut">登出</button>
     </div>
 
     <div class="card stack" style="margin-top: 16px">
@@ -84,9 +84,9 @@ async function onConnect() {
         <label>改用其他試算表（貼上連結）</label>
         <input v-model="pasted" placeholder="https://docs.google.com/spreadsheets/d/…" />
       </div>
-      <button class="btn secondary" :disabled="!pasted.trim() || state.loading" @click="onConnect">使用這張表</button>
-      <button class="btn ghost" :disabled="state.loading" @click="onCreateNew">新建一張表</button>
-      <button class="btn ghost" @click="onDisconnect">解除連結</button>
+      <button class="btn secondary" :disabled="!pasted.trim() || reviewBusy || state.loading" @click="onConnect">使用這張表</button>
+      <button class="btn ghost" :disabled="reviewBusy || state.loading" @click="onCreateNew">新建一張表</button>
+      <button class="btn ghost" :disabled="reviewBusy || state.loading" @click="onDisconnect">解除連結</button>
     </div>
 
     <div class="card stack" style="margin-top: 16px">
