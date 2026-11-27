@@ -16,6 +16,8 @@ import java.util.List;
 
 @CapacitorPlugin(name = "BookkeepingSpeech")
 public final class BookkeepingSpeechPlugin extends Plugin {
+    private static final String NO_SPEECH_ACTIVITY = "這台手機沒有可用的 Android 語音辨識服務，可改用鍵盤輸入。";
+
     // Capacitor retains only one activity callback per plugin. Access on the UI thread.
     private boolean listening;
 
@@ -31,13 +33,18 @@ public final class BookkeepingSpeechPlugin extends Plugin {
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-TW");
 
-            listening = true;
             try {
+                // Android can enqueue a canceled result even when launching an unresolved intent throws.
+                if (intent.resolveActivity(getContext().getPackageManager()) == null) {
+                    call.unavailable(NO_SPEECH_ACTIVITY);
+                    return;
+                }
+                listening = true;
                 // The system speech activity owns microphone permission and only returns text.
                 startActivityForResult(call, intent, "onSpeechResult");
             } catch (ActivityNotFoundException e) {
                 listening = false;
-                call.unavailable("這台手機沒有可用的 Android 語音辨識服務，可改用鍵盤輸入。");
+                call.unavailable(NO_SPEECH_ACTIVITY);
             } catch (SecurityException e) {
                 listening = false;
                 call.reject("未允許使用 Android 語音辨識，可改用鍵盤輸入。");
@@ -51,21 +58,33 @@ public final class BookkeepingSpeechPlugin extends Plugin {
     @ActivityCallback
     private void onSpeechResult(PluginCall call, ActivityResult result) {
         listening = false;
-        if (call == null || PluginCall.CALLBACK_ID_DANGLING.equals(call.getCallbackId())) return;
+        if (call == null) return;
 
+        String text = null;
+        String error = null;
         try {
             Intent data = result.getData();
             int code = result.getResultCode();
             List<?> matches = code == Activity.RESULT_OK && data != null
                     ? data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS) : null;
-            String text = transcriptFromResult(code, matches);
-            JSObject response = new JSObject();
-            if (text != null) response.put("text", text);
-            call.resolve(response);
+            text = transcriptFromResult(code, matches);
         } catch (IllegalStateException e) {
-            call.reject(e.getMessage());
+            error = e.getMessage();
         } catch (BadParcelableException e) {
-            call.reject("無法讀取語音辨識結果，請重試或改用鍵盤輸入。");
+            error = "無法讀取語音辨識結果，請重試或改用鍵盤輸入。";
+        }
+
+        JSObject response = new JSObject().put("text", text);
+        if (PluginCall.CALLBACK_ID_DANGLING.equals(call.getCallbackId())) {
+            String draftId = call.getString("draftId");
+            if (draftId == null) return;
+            response.put("draftId", draftId).put("error", error);
+            // The new WebView may still be loading. Retain the result until its listener attaches.
+            getBridge().execute(() -> notifyListeners("restoredSpeechResult", response, true));
+        } else if (error != null) {
+            call.reject(error);
+        } else {
+            call.resolve(response);
         }
     }
 

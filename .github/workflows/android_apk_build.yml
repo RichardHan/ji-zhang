@@ -170,11 +170,21 @@ jobs:
           -Dorg.gradle.internal.http.connectionTimeout=60000
           -Dorg.gradle.internal.http.socketTimeout=120000
 
-      - name: Verify alignment, signature and certificate
+      - name: Verify APK alignment, signature and logging
         run: |
           set -euo pipefail
           BT="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}"
           APK=android-shell/android/app/build/outputs/apk/debug/app-debug.apk
+          python3 - "$APK" <<'PY'
+          import json
+          import sys
+          from zipfile import ZipFile
+
+          with ZipFile(sys.argv[1]) as apk:
+              config = json.loads(apk.read("assets/capacitor.config.json"))
+          if config.get("android", {}).get("loggingBehavior") != "none":
+              sys.exit("::error::Capacitor logging must be disabled in the downloadable APK.")
+          PY
           "$BT/zipalign" -c -P 16 4 "$APK"
           "$BT/apksigner" verify "$APK"
           CERT=$("$BT/apksigner" verify --print-certs "$APK" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)

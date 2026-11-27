@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { parseTransactionsWithAI } from '../ai/openrouter'
 import { useApp } from '../composables/useApp'
 import { formatTWD } from '../dates'
 import { bookkeepingSpeech, canUseBookkeepingSpeech } from '../speech'
+import { storage } from '../storage'
 
 const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
 const router = useRouter()
@@ -12,30 +13,105 @@ const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
 const listening = ref(false)
+const restoring = ref(canUseBookkeepingSpeech)
+const speechBusy = computed(() => listening.value || restoring.value)
 const usedVoice = ref(false)
 const speechStatus = ref('')
 const speechError = ref('')
 const pendingCount = computed(() => pendingBatches.value.reduce((total, batch) => total + batch.drafts.length, 0))
+let restoredDraftId: string | null = null
+let removeRestoreListener: (() => Promise<void>) | undefined
+let mounted = true
+let selectedVoiceText: string | null = null
+
+function rememberPromptSelection(event: Event) {
+  // Keep the original selection while the keyboard composes a replacement.
+  if (event instanceof InputEvent && event.isComposing) return
+  const field = event.currentTarget as HTMLTextAreaElement
+  selectedVoiceText = usedVoice.value && field.selectionStart === 0 && field.selectionEnd === field.value.length
+    ? field.value
+    : null
+}
+
+function finishPromptEdit(event: Event) {
+  if (event instanceof InputEvent && event.isComposing) return
+  const field = event.currentTarget as HTMLTextAreaElement
+  if (selectedVoiceText !== null && field.value !== selectedVoiceText) {
+    usedVoice.value = false
+    speechStatus.value = ''
+  }
+  selectedVoiceText = null
+}
+
+function applySpeechResult(text?: string) {
+  const transcript = text?.trim()
+  if (!transcript) {
+    speechStatus.value = '已結束語音輸入，原有文字未變更。'
+    return
+  }
+  const existing = prompt.value.trimEnd()
+  prompt.value = existing ? `${existing}\n${transcript}` : transcript
+  usedVoice.value = true
+  speechStatus.value = '已轉成文字，可先修改，再按「解析並預覽」。'
+}
+
+onMounted(async () => {
+  if (!canUseBookkeepingSpeech) return
+  try {
+    const draft = await storage.getSpeechDraft()
+    if (!mounted || !draft || draft.book !== reviewBook.value) return
+    prompt.value = draft.prompt
+    usedVoice.value = draft.usedVoice
+    restoredDraftId = draft.id
+
+    const listener = await bookkeepingSpeech.addListener('restoredSpeechResult', (result) => {
+      if (!mounted || result.draftId !== restoredDraftId || draft.book !== reviewBook.value) return
+      restoredDraftId = null
+      if (result.error) speechError.value = result.error
+      else applySpeechResult(result.text)
+    })
+    if (!mounted) {
+      await listener.remove()
+      return
+    }
+    removeRestoreListener = () => listener.remove()
+    await storage.clearSpeechDraft(draft.id)
+  } catch {
+    speechError.value = '無法還原裝置上的語音草稿。'
+  } finally {
+    restoring.value = false
+  }
+})
+
+onUnmounted(() => {
+  mounted = false
+  void removeRestoreListener?.().catch(() => {})
+})
 
 async function dictate() {
-  if (!canUseBookkeepingSpeech || listening.value || parsing.value) return
+  if (!canUseBookkeepingSpeech || speechBusy.value || parsing.value) return
+  const book = reviewBook.value
+  let draftId: string | undefined
+  restoredDraftId = null
   listening.value = true
   speechStatus.value = ''
   speechError.value = ''
   try {
-    const { text } = await bookkeepingSpeech.recognize()
-    const transcript = text?.trim()
-    if (!transcript) {
-      speechStatus.value = '已結束語音輸入，原有文字未變更。'
-      return
+    if (book) {
+      const id = crypto.randomUUID()
+      await storage.saveSpeechDraft({ id, book, prompt: prompt.value, usedVoice: usedVoice.value })
+      draftId = id
     }
-    const existing = prompt.value.trimEnd()
-    prompt.value = existing ? `${existing}\n${transcript}` : transcript
-    usedVoice.value = true
-    speechStatus.value = '已轉成文字，可先修改，再按「解析並預覽」。'
+    const { text } = await bookkeepingSpeech.recognize({ draftId })
+    if (book === reviewBook.value) applySpeechResult(text)
   } catch (err) {
     speechError.value = err instanceof Error ? err.message : '無法使用語音輸入，請改用鍵盤。'
   } finally {
+    if (draftId) {
+      await storage.clearSpeechDraft(draftId).catch(() => {
+        speechError.value ||= '無法清除裝置上的語音草稿。'
+      })
+    }
     listening.value = false
   }
 }
@@ -48,7 +124,8 @@ watch(prompt, (text) => {
 })
 
 async function parse() {
-  if (listening.value || parsing.value || reviewBusy.value || state.loading || !prompt.value.trim() || !state.openRouterKey) return
+  if (speechBusy.value || parsing.value || reviewBusy.value || state.loading || !prompt.value.trim() || !state.openRouterKey) return
+  restoredDraftId = null
   const book = reviewBook.value
   parseError.value = ''
   speechError.value = ''
@@ -89,7 +166,11 @@ const recent = () => state.transactions.slice(0, 5)
           id="ai-transaction-input"
           v-model="prompt"
           placeholder="午餐 120 信用卡"
-          :disabled="listening || parsing"
+          :disabled="speechBusy || parsing"
+          @beforeinput="rememberPromptSelection"
+          @compositionstart="rememberPromptSelection"
+          @input="finishPromptEdit"
+          @compositionend="finishPromptEdit"
           @keydown.ctrl.enter.prevent="parse"
         />
       </div>
@@ -97,14 +178,14 @@ const recent = () => state.transactions.slice(0, 5)
         <p id="speech-privacy" class="muted small" style="margin: 0">
           Android 的語音辨識服務可能會透過網路處理音訊；記帳 App 只接收轉成的文字。
         </p>
-        <button type="button" class="btn ghost block" aria-describedby="speech-privacy" :disabled="listening || parsing" @click="dictate">
+        <button type="button" class="btn ghost block" aria-describedby="speech-privacy" :disabled="speechBusy || parsing" @click="dictate">
           {{ listening ? '語音辨識中…' : '使用語音輸入' }}
         </button>
         <p v-if="speechStatus" class="muted small" role="status" style="margin: 0">{{ speechStatus }}</p>
         <p v-if="speechError" class="banner error" role="alert" style="margin: 0">{{ speechError }}</p>
       </template>
       <p class="muted small" style="margin: 0">按下解析會將文字傳給 OpenRouter；你確認後才會寫入試算表。</p>
-      <button class="btn accent block" :disabled="listening || parsing || reviewBusy || state.loading || !prompt.trim() || !state.openRouterKey" @click="parse">
+      <button class="btn accent block" :disabled="speechBusy || parsing || reviewBusy || state.loading || !prompt.trim() || !state.openRouterKey" @click="parse">
         {{ parsing ? '解析中…' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>
