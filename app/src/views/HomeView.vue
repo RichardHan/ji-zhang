@@ -6,6 +6,7 @@ import { useApp } from '../composables/useApp'
 import { formatTWD } from '../dates'
 import { bookkeepingSpeech, canUseBookkeepingSpeech } from '../speech'
 import ReceiptPhotoInput from '../components/ReceiptPhotoInput.vue'
+import { Capacitor } from '@capacitor/core'
 import { storage } from '../storage'
 
 const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
@@ -193,6 +194,7 @@ const recent = () => state.transactions.slice(0, 5)
     </div>
 
     <ReceiptPhotoInput />
+    <router-link v-if="Capacitor.isPluginAvailable('VideoReceipt')" class="btn ghost block" style="margin-top: 12px" to="/video">影片記帳</router-link>
     <router-link class="btn ghost block" style="margin-top: 12px" to="/mail">匯入 Gmail 郵件</router-link>
     <router-link class="btn ghost block" style="margin-top: 12px" to="/invoice">匯入電子發票／收據</router-link>
 

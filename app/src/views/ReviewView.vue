@@ -10,6 +10,7 @@ const sourceLabels = {
   manual: '手動輸入',
   'ai-text': 'AI 文字解析',
   voice: '語音輸入',
+  video: '影片記帳',
   photo: '收據照片',
   invoice: '電子發票／收據',
   'mail-invoice': '郵件發票',

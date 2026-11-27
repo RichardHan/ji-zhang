@@ -22,7 +22,7 @@ export interface DraftTransaction {
 }
 
 export interface ReviewSource {
-  kind: 'manual' | 'ai-text' | 'voice' | 'photo' | 'invoice' | 'mail-invoice' | 'mail-card'
+  kind: 'manual' | 'video' | 'ai-text' | 'voice' | 'photo' | 'invoice' | 'mail-invoice' | 'mail-card'
   modelUsed?: string
   mailDetail?: string
   invoiceNumber?: string

@@ -321,3 +321,50 @@ test('an invoice attachment and a card notification meet in the review queue bef
   assert.equal(ledger.get(book).rows.length, 1)
   assert.ok(!JSON.stringify(ledger.get(book).rows).includes('fixture@example.test'))
 })
+
+test('repeated video frames, a partial frame and narration produce one reviewable purchase', async () => {
+  const { videoDrafts } = await server.ssrLoadModule('/src/video.ts')
+  const frame = '商家：海山茶舖\nAB-11223344\n2026/10/05\n合計 120'
+  const voice = { ...draft, note: '午餐' }
+  const candidates = videoDrafts(['2026/10/05', frame, frame, frame.replace('合計 120', '')], [voice, voice])
+  assert.equal(candidates.length, 1)
+  assert.deepEqual([candidates[0].note, candidates[0].date, candidates[0].amount], ['海山茶舖', '2026-10-05', 120])
+  const id = await app.stageDrafts(candidates, { kind: 'video' })
+  assert.equal(ledger.get(book).rows.length, 0)
+  assert.doesNotMatch(JSON.stringify(await storage.getPendingBatches()), /合計|AB-11223344/)
+  await app.confirmPendingBatch(id)
+  assert.equal(ledger.get(book).rows.length, 1)
+  const separate = videoDrafts([frame, frame.replace('AB-11223344', 'AB-11223345')])
+  assert.equal(separate.length, 2)
+})
+
+test('missing or contradictory video totals stay pending and discarding never appends', async () => {
+  const { videoDrafts } = await server.ssrLoadModule('/src/video.ts')
+  const frame = '商家：海山茶舖\n2026/10/05'
+  for (const input of [[], [frame], [frame + '\n合計 120', frame + '\n合計 130']]) {
+    const [candidate] = videoDrafts(input)
+    assert.equal(candidate.amount, 0)
+    const id = await app.stageDrafts([candidate], { kind: 'video' })
+    await assert.rejects(app.confirmPendingBatch(id), /補齊/)
+    await app.discardPendingBatch(id)
+  }
+  assert.equal(videoDrafts([frame + '\n實付 130'], [draft])[0].amount, 0)
+  assert.equal(videoDrafts([frame + '\nUSD 20'], [draft])[0].amount, 0)
+  assert.equal(videoDrafts([frame], [draft])[0].amount, 120)
+  assert.equal(videoDrafts([], [draft])[0].amount, 120)
+  assert.equal(ledger.get(book).rows.length, 0)
+})
+
+test('video transcription sends only the selected audio track and reads the transcript', async (t) => {
+  const { transcribeVideoAudio } = await server.ssrLoadModule('/src/video.ts')
+  const signal = new AbortController().signal
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, 'https://openrouter.ai/api/v1/audio/transcriptions')
+    assert.equal(options.signal, signal)
+    assert.deepEqual(JSON.parse(options.body), {
+      model: 'openai/whisper-1', language: 'zh', input_audio: { format: 'm4a', data: 'YXVkaW8=' },
+    })
+    return Response.json({ text: ' 午餐 120 元 ' })
+  })
+  assert.equal(await transcribeVideoAudio('fixture', 'YXVkaW8=', signal), '午餐 120 元')
+})
