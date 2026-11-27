@@ -10,10 +10,11 @@ const sourceLabels = {
   manual: '手動輸入',
   'ai-text': 'AI 文字解析',
   voice: '語音輸入',
+  photo: '收據照片',
 } satisfies Record<ReviewSource['kind'], string>
 
 const {
-  state, reviewBook, reviewBusy, reviewError, pendingBatches, reviewTransactions,
+  state, receiptPreviews, reviewBook, reviewBusy, reviewError, pendingBatches, reviewTransactions,
   refreshTransactions, editPendingDraft, confirmPendingBatch, discardPendingBatch,
 } = useApp()
 const editing = ref<{ batchId: string; index: number; draft: DraftTransaction } | null>(null)
@@ -30,7 +31,7 @@ const batches = computed(() => {
     rows: batch.drafts.map((draft) => {
       const key = similarTransactionKey(draft)
       if (key) counts.set(key, (counts.get(key) ?? 0) + 1)
-      return { draft, key, missing: missingDraftFields(draft) }
+      return { draft, key, missing: missingDraftFields(draft, batch.source) }
     }),
   }))
   return groups.map(({ batch, rows }) => {
@@ -113,6 +114,10 @@ function stopRetry(id: string) {
     <p v-if="!batches.length && !reviewError" class="muted">沒有待確認的記錄。</p>
     <section v-for="{ batch, rows, hasDuplicates, needsInput } in batches" :key="batch.id" class="card stack">
       <h2 style="margin: 0; font-size: 1rem">{{ sourceLabels[batch.source] }}</h2>
+      <details v-if="receiptPreviews.has(batch.id)" open>
+        <summary>核對收據照片</summary>
+        <img :src="receiptPreviews.get(batch.id)" alt="本次收據照片" style="width: 100%; max-height: 42vh; object-fit: contain" />
+      </details>
       <small v-if="batch.modelUsed" class="muted">模型：{{ batch.modelUsed }}</small>
       <p v-if="batch.submitted" class="banner warn" role="status">
         這批已嘗試寫入。如果上次結果不明，可以安全重試；不會重複入帳。

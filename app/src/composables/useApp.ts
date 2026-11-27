@@ -56,6 +56,7 @@ function createAppStore() {
     state.transactions.filter((t) => monthKey(t.date) === state.selectedMonth),
   )
 
+  const receiptPreviews = reactive(new Map<string, string>())
   const queued = ref<PendingBatch[]>([])
   const reviewBusy = ref(false)
   const reviewError = ref('')
@@ -72,6 +73,9 @@ function createAppStore() {
   async function persistQueue(next: PendingBatch[]): Promise<void> {
     await storage.setPendingBatches(next)
     queued.value = next
+    for (const id of receiptPreviews.keys()) {
+      if (!next.some((batch) => batch.id === id)) receiptPreviews.delete(id)
+    }
   }
 
   async function changeQueue<T>(book: string | null, run: (book: string) => Promise<T>): Promise<T> {
@@ -94,20 +98,21 @@ function createAppStore() {
     drafts: DraftTransaction[],
     source: ReviewSource,
     book = reviewBook.value,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     if (drafts.length === 0) return
-    await changeQueue(book, async (book) => {
+    return changeQueue(book, async (book) => {
       // Only opaque keys go into Sheets. The same source event must have the same key on every device.
       const id = source.eventId
         ? Array.from(new Uint8Array(await crypto.subtle.digest(
           'SHA-256', new TextEncoder().encode(JSON.stringify([source.kind, source.eventId])),
         )), (byte) => byte.toString(16).padStart(2, '0')).join('')
         : crypto.randomUUID().replaceAll('-', '')
-      if (queued.value.some((batch) => batch.book === book && batch.id === id)) return
+      if (queued.value.some((batch) => batch.book === book && batch.id === id)) return id
       await persistQueue([
         ...queued.value,
         { id, book, source: source.kind, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
       ])
+      return id
     })
   }
 
@@ -255,8 +260,8 @@ function createAppStore() {
   async function confirmPendingBatch(id: string) {
     return changeQueue(reviewBook.value, async () => {
       const batch = pendingBatch(id)
-      if (batch.drafts.some((draft) => missingDraftFields(draft).length)) {
-        throw new Error('請先補齊日期與 TWD 金額。')
+      if (batch.drafts.some((draft) => missingDraftFields(draft, batch.source).length)) {
+        throw new Error('請先補齊待確認欄位。')
       }
       // Persist the intent before the write; retries after a restart use the same batch and payload.
       if (!batch.submitted) await replaceBatch(batch, { ...batch, submitted: true })
@@ -322,6 +327,7 @@ function createAppStore() {
     state.loading = true
     try {
       await signOutGoogle()
+      receiptPreviews.clear()
       state.signedIn = false
       state.profile = null
       state.transactions = []
@@ -350,6 +356,7 @@ function createAppStore() {
     connectSheet,
     changeSheet,
     refreshTransactions,
+    receiptPreviews,
     reviewBook,
     reviewBusy,
     reviewError,

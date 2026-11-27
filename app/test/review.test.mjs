@@ -212,3 +212,27 @@ test('existing Sheets dates match equivalent ISO drafts without losing the origi
     similarTransactionKey(draft), similarTransactionKey(draft),
   ])
 })
+
+test('receipt review requires a merchant, date and actual TWD total; previews do not persist', async () => {
+  const { receiptDraft } = await server.ssrLoadModule('/src/receipt.ts')
+  const clear = receiptDraft('山海茶舖\n115/11/27\n小計 160\n實付 NT$120\n找零 380')
+  assert.deepEqual([clear.note, clear.date, clear.amount], ['山海茶舖', '2026-11-27', 120])
+  assert.equal(receiptDraft('TOTAL: 1,200.00').amount, 1200)
+  for (const text of ['找零 380', 'Subtotal 90', '合計 6.75', 'USD 7\nTOTAL 7', '合計 20\n合計 200']) {
+    assert.equal(receiptDraft(text).amount, 0, text)
+  }
+  assert.equal(receiptDraft('日期 2026/02/30').date, '')
+  const blank = receiptDraft('')
+  const id = await app.stageDrafts([blank], { kind: 'photo' })
+  app.receiptPreviews.set(id, 'test-preview')
+  assert.equal(app.pendingBatches.value[0].source, 'photo')
+  assert.ok(!JSON.stringify(await storage.getPendingBatches()).includes('test-preview'))
+  await assert.rejects(app.confirmPendingBatch(id), /補齊/)
+  await app.editPendingDraft(id, 0, { ...clear, note: '' })
+  await assert.rejects(app.confirmPendingBatch(id), /補齊/)
+  assert.equal(ledger.get(book).rows.length, 0)
+  await app.editPendingDraft(id, 0, clear)
+  await app.confirmPendingBatch(id)
+  assert.deepEqual(ledger.get(book).rows.map(row => row[1]), [120])
+  assert.equal(app.receiptPreviews.has(id), false)
+})
