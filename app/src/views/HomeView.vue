@@ -1,70 +1,146 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import ConfirmTransactions from '../components/ConfirmTransactions.vue'
-import TransactionForm from '../components/TransactionForm.vue'
 import { parseTransactionsWithAI } from '../ai/openrouter'
 import { useApp } from '../composables/useApp'
-import { formatTWD, todayISO } from '../dates'
-import type { DraftTransaction } from '../types'
+import { formatTWD } from '../dates'
+import { bookkeepingSpeech, canUseBookkeepingSpeech } from '../speech'
+import { storage } from '../storage'
 
-const { state, addDrafts } = useApp()
+const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
 const router = useRouter()
 const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
-const drafts = ref<DraftTransaction[]>([])
-const modelUsed = ref('')
-const editingIndex = ref<number | null>(null)
-const editDraft = ref<DraftTransaction>(emptyDraft())
+const listening = ref(false)
+const restoring = ref(canUseBookkeepingSpeech)
+const speechBusy = computed(() => listening.value || restoring.value)
+const usedVoice = ref(false)
+const speechStatus = ref('')
+const speechError = ref('')
+const pendingCount = computed(() => pendingBatches.value.reduce((total, batch) => total + batch.drafts.length, 0))
+let restoredDraftId: string | null = null
+let removeRestoreListener: (() => Promise<void>) | undefined
+let mounted = true
+let selectedVoiceText: string | null = null
 
-function emptyDraft(): DraftTransaction {
-  return {
-    date: todayISO(),
-    amount: 0,
-    category: '餐飲',
-    account: '',
-    note: '',
-    type: '支出',
+function rememberPromptSelection(event: Event) {
+  // Keep the original selection while the keyboard composes a replacement.
+  if (event instanceof InputEvent && event.isComposing) return
+  const field = event.currentTarget as HTMLTextAreaElement
+  selectedVoiceText = usedVoice.value && field.selectionStart === 0 && field.selectionEnd === field.value.length
+    ? field.value
+    : null
+}
+
+function finishPromptEdit(event: Event) {
+  if (event instanceof InputEvent && event.isComposing) return
+  const field = event.currentTarget as HTMLTextAreaElement
+  if (selectedVoiceText !== null && field.value !== selectedVoiceText) {
+    usedVoice.value = false
+    speechStatus.value = ''
+  }
+  selectedVoiceText = null
+}
+
+function applySpeechResult(text?: string) {
+  const transcript = text?.trim()
+  if (!transcript) {
+    speechStatus.value = '已結束語音輸入，原有文字未變更。'
+    return
+  }
+  const existing = prompt.value.trimEnd()
+  prompt.value = existing ? `${existing}\n${transcript}` : transcript
+  usedVoice.value = true
+  speechStatus.value = '已轉成文字，可先修改，再按「解析並預覽」。'
+}
+
+onMounted(async () => {
+  if (!canUseBookkeepingSpeech) return
+  try {
+    const draft = await storage.getSpeechDraft()
+    if (!mounted || !draft || draft.book !== reviewBook.value) return
+    prompt.value = draft.prompt
+    usedVoice.value = draft.usedVoice
+    restoredDraftId = draft.id
+
+    const listener = await bookkeepingSpeech.addListener('restoredSpeechResult', (result) => {
+      if (!mounted || result.draftId !== restoredDraftId || draft.book !== reviewBook.value) return
+      restoredDraftId = null
+      if (result.error) speechError.value = result.error
+      else applySpeechResult(result.text)
+    })
+    if (!mounted) {
+      await listener.remove()
+      return
+    }
+    removeRestoreListener = () => listener.remove()
+    await storage.clearSpeechDraft(draft.id)
+  } catch {
+    speechError.value = '無法還原裝置上的語音草稿。'
+  } finally {
+    restoring.value = false
+  }
+})
+
+onUnmounted(() => {
+  mounted = false
+  void removeRestoreListener?.().catch(() => {})
+})
+
+async function dictate() {
+  if (!canUseBookkeepingSpeech || speechBusy.value || parsing.value) return
+  const book = reviewBook.value
+  let draftId: string | undefined
+  restoredDraftId = null
+  listening.value = true
+  speechStatus.value = ''
+  speechError.value = ''
+  try {
+    if (book) {
+      const id = crypto.randomUUID()
+      await storage.saveSpeechDraft({ id, book, prompt: prompt.value, usedVoice: usedVoice.value })
+      draftId = id
+    }
+    const { text } = await bookkeepingSpeech.recognize({ draftId })
+    if (book === reviewBook.value) applySpeechResult(text)
+  } catch (err) {
+    speechError.value = err instanceof Error ? err.message : '無法使用語音輸入，請改用鍵盤。'
+  } finally {
+    if (draftId) {
+      await storage.clearSpeechDraft(draftId).catch(() => {
+        speechError.value ||= '無法清除裝置上的語音草稿。'
+      })
+    }
+    listening.value = false
   }
 }
 
+watch(prompt, (text) => {
+  if (!text.trim()) {
+    usedVoice.value = false
+    speechStatus.value = ''
+  }
+})
+
 async function parse() {
+  if (speechBusy.value || parsing.value || reviewBusy.value || state.loading || !prompt.value.trim() || !state.openRouterKey) return
+  restoredDraftId = null
+  const book = reviewBook.value
   parseError.value = ''
+  speechError.value = ''
   parsing.value = true
-  drafts.value = []
+
   try {
     const result = await parseTransactionsWithAI(state.openRouterKey, state.model, prompt.value)
-    drafts.value = result.transactions
-    modelUsed.value = result.modelUsed
+    await stageDrafts(result.transactions, { kind: usedVoice.value ? 'voice' : 'ai-text', modelUsed: result.modelUsed }, book)
+    prompt.value = ''
+    if (router.currentRoute.value.name === 'home') await router.push({ name: 'review' })
   } catch (err) {
     parseError.value = err instanceof Error ? err.message : String(err)
   } finally {
     parsing.value = false
   }
-}
-
-async function confirm() {
-  parseError.value = ''
-  try {
-    await addDrafts(drafts.value)
-    drafts.value = []
-    prompt.value = ''
-    modelUsed.value = ''
-  } catch (err) {
-    parseError.value = err instanceof Error ? err.message : String(err)
-  }
-}
-
-function startEdit(index: number) {
-  editingIndex.value = index
-  editDraft.value = { ...drafts.value[index] }
-}
-
-function applyEdit() {
-  if (editingIndex.value === null) return
-  drafts.value[editingIndex.value] = { ...editDraft.value }
-  editingIndex.value = null
 }
 
 const recent = () => state.transactions.slice(0, 5)
@@ -81,31 +157,38 @@ const recent = () => state.transactions.slice(0, 5)
       貼上金鑰後再用 AI。
     </div>
     <div v-if="parseError" class="banner error">{{ parseError }}</div>
+    <p><router-link to="/review">待確認清單（{{ pendingCount }} 筆）</router-link></p>
 
     <div class="card stack ai-box">
       <div class="field">
-        <label>用 AI 記帳</label>
-        <textarea v-model="prompt" placeholder="午餐 120 信用卡" :disabled="parsing" @keydown.ctrl.enter="parse" />
+        <label for="ai-transaction-input">用 AI 記帳（TWD）</label>
+        <textarea
+          id="ai-transaction-input"
+          v-model="prompt"
+          placeholder="午餐 120 信用卡"
+          :disabled="speechBusy || parsing"
+          @beforeinput="rememberPromptSelection"
+          @compositionstart="rememberPromptSelection"
+          @input="finishPromptEdit"
+          @compositionend="finishPromptEdit"
+          @keydown.ctrl.enter.prevent="parse"
+        />
       </div>
-      <button class="btn accent block" :disabled="parsing || !prompt.trim() || !state.openRouterKey" @click="parse">
+      <template v-if="canUseBookkeepingSpeech">
+        <p id="speech-privacy" class="muted small" style="margin: 0">
+          Android 的語音辨識服務可能會透過網路處理音訊；記帳 App 只接收轉成的文字。
+        </p>
+        <button type="button" class="btn ghost block" aria-describedby="speech-privacy" :disabled="speechBusy || parsing" @click="dictate">
+          {{ listening ? '語音辨識中…' : '使用語音輸入' }}
+        </button>
+        <p v-if="speechStatus" class="muted small" role="status" style="margin: 0">{{ speechStatus }}</p>
+        <p v-if="speechError" class="banner error" role="alert" style="margin: 0">{{ speechError }}</p>
+      </template>
+      <p class="muted small" style="margin: 0">按下解析會將文字傳給 OpenRouter；你確認後才會寫入試算表。</p>
+      <button class="btn accent block" :disabled="speechBusy || parsing || reviewBusy || state.loading || !prompt.trim() || !state.openRouterKey" @click="parse">
         {{ parsing ? '解析中…' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>
-    </div>
-
-    <div v-if="drafts.length && editingIndex === null" style="margin-top: 16px">
-      <ConfirmTransactions
-        :drafts="drafts"
-        :model-used="modelUsed"
-        @confirm="confirm"
-        @cancel="drafts = []"
-        @edit="startEdit"
-      />
-    </div>
-
-    <div v-if="editingIndex !== null" class="card" style="margin-top: 16px">
-      <h3>修改這一筆</h3>
-      <TransactionForm v-model="editDraft" submit-label="套用" @submit="applyEdit" @cancel="editingIndex = null" />
     </div>
 
     <div style="margin-top: 24px">

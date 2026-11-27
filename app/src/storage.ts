@@ -1,4 +1,6 @@
 import { Preferences } from '@capacitor/preferences'
+import type { SpeechDraft } from './speech'
+import type { PendingBatch } from './types'
 
 const KEYS = {
   openRouterKey: 'openrouter_api_key',
@@ -8,6 +10,8 @@ const KEYS = {
   email: 'google_email',
   name: 'google_name',
   imageUrl: 'google_image',
+  pendingBatches: 'pending_transaction_batches',
+  speechDraft: 'pending_speech_draft',
 } as const
 
 async function get(key: string): Promise<string> {
@@ -21,6 +25,17 @@ async function set(key: string, value: string): Promise<void> {
   } else {
     await Preferences.remove({ key })
   }
+}
+
+async function getSpeechDraft(): Promise<SpeechDraft | null> {
+  const json = await get(KEYS.speechDraft)
+  if (!json) return null
+  const draft = JSON.parse(json) as Partial<SpeechDraft> | null
+  if (typeof draft?.id !== 'string' || typeof draft.book !== 'string'
+    || typeof draft.prompt !== 'string' || typeof draft.usedVoice !== 'boolean') {
+    throw new Error('Invalid speech draft')
+  }
+  return { id: draft.id, book: draft.book, prompt: draft.prompt, usedVoice: draft.usedVoice }
 }
 
 export const storage = {
@@ -39,6 +54,20 @@ export const storage = {
     await set(KEYS.email, email)
     await set(KEYS.name, name)
     await set(KEYS.imageUrl, imageUrl)
+  },
+  getPendingBatches: async (): Promise<PendingBatch[]> => {
+    const json = await get(KEYS.pendingBatches)
+    if (!json) return []
+    const batches: unknown = JSON.parse(json)
+    if (!Array.isArray(batches)) throw new Error('Invalid pending transaction queue')
+    return batches as PendingBatch[]
+  },
+  setPendingBatches: (batches: PendingBatch[]) =>
+    set(KEYS.pendingBatches, batches.length ? JSON.stringify(batches) : ''),
+  getSpeechDraft,
+  saveSpeechDraft: (draft: SpeechDraft) => set(KEYS.speechDraft, JSON.stringify(draft)),
+  clearSpeechDraft: async (id: string) => {
+    if ((await getSpeechDraft())?.id === id) await set(KEYS.speechDraft, '')
   },
   clearAuth: async () => {
     await Preferences.remove({ key: KEYS.email })
