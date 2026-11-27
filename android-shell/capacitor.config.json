@@ -3,7 +3,8 @@
   "appName": "記帳",
   "webDir": "../app/dist",
   "android": {
-    "allowMixedContent": true
+    "allowMixedContent": true,
+    "loggingBehavior": "none"
   },
   "plugins": {
     "CapacitorHttp": {
