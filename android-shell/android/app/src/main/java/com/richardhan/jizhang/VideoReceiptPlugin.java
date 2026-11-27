@@ -155,20 +155,24 @@ public final class VideoReceiptPlugin extends Plugin {
                 try {
                     int track = muxer.addTrack(format);
                     muxer.start();
-                    ByteBuffer sample = ByteBuffer.allocate(128 * 1024);
+                    ByteBuffer sample = ByteBuffer.allocateDirect(128 * 1024);
                     MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
                     int total = 0;
-                    while (extractor.getSampleTime() >= 0) {
+                    // AAC encoder priming can put the first packet before time zero.
+                    // Track index, unlike presentation time, distinguishes end of input.
+                    long startTime = extractor.getSampleTime();
+                    while (extractor.getSampleTrackIndex() == i) {
                         sample.clear();
                         int size = extractor.readSampleData(sample, 0);
                         if (size < 0) break;
                         total += size;
                         if (size > sample.capacity() || total > 4 * 1024 * 1024) throw new IOException();
-                        info.set(0, size, extractor.getSampleTime(), 0);
+                        info.set(0, size, extractor.getSampleTime() - startTime, MediaCodec.BUFFER_FLAG_KEY_FRAME);
                         muxer.writeSampleData(track, sample, info);
                         extractor.advance();
                     }
                     muxer.stop();
+                    if (total == 0) throw new IOException();
                 } finally {
                     muxer.release();
                 }
