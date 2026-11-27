@@ -3,7 +3,8 @@ import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApp } from './composables/useApp'
 
-import { receiptPlugin, nativeReceipts, sharedInvoice } from './receiptInput'
+import { receiptPlugin, nativeReceipts, sharedInvoice, sharedMail } from './receiptInput'
+import { isMailShare } from './mail'
 import type { PluginListenerHandle } from '@capacitor/core'
 
 const { state, hasSheet, hydrate } = useApp()
@@ -12,20 +13,24 @@ const router = useRouter()
 const bare = computed(() => Boolean(route.meta.bare))
 const tab = computed(() => String(route.meta.tab || ''))
 
+const shareRoute = computed(() => sharedMail.value ? 'mail' : sharedInvoice.value ? 'invoice' : undefined)
+
 function maybeRedirect() {
   if (!state.ready) return
   const needsSetup = !state.signedIn || !hasSheet.value
   if (needsSetup && route.name !== 'setup') {
     router.replace({ name: 'setup' })
   } else if (!needsSetup && route.name === 'setup') {
-    router.replace({ name: sharedInvoice.value ? 'invoice' : 'home' })
+    router.replace({ name: shareRoute.value ?? 'home' })
   }
 }
 
 const shareListener = nativeReceipts ? receiptPlugin.addListener('sharedInvoice', (share) => {
-  sharedInvoice.value = share
-  if (state.ready && state.signedIn && hasSheet.value && route.name !== 'invoice') {
-    void router.push({ name: 'invoice' })
+  const name = share.mail || isMailShare(share.text ?? '', share.subject) ? 'mail' : 'invoice'
+  if (name === 'mail') sharedMail.value = share
+  else sharedInvoice.value = share
+  if (state.ready && state.signedIn && hasSheet.value && route.name !== name) {
+    void router.push({ name })
   }
 }) : undefined
 onUnmounted(() => { void shareListener?.then((listener: PluginListenerHandle) => listener.remove()) })
@@ -33,7 +38,7 @@ onUnmounted(() => { void shareListener?.then((listener: PluginListenerHandle) =>
 onMounted(async () => {
   await hydrate()
   maybeRedirect()
-  if (sharedInvoice.value && state.signedIn && hasSheet.value) await router.replace({ name: 'invoice' })
+  if (shareRoute.value && state.signedIn && hasSheet.value) await router.replace({ name: shareRoute.value })
 })
 
 watch(

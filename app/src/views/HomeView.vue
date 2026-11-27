@@ -193,6 +193,7 @@ const recent = () => state.transactions.slice(0, 5)
     </div>
 
     <ReceiptPhotoInput />
+    <router-link class="btn ghost block" style="margin-top: 12px" to="/mail">匯入 Gmail 郵件</router-link>
     <router-link class="btn ghost block" style="margin-top: 12px" to="/invoice">匯入電子發票／收據</router-link>
 
     <div style="margin-top: 24px">

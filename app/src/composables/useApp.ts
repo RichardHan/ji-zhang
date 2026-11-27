@@ -101,12 +101,12 @@ function createAppStore() {
     return Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
   }
 
-  async function invoiceDuplicate(id: string, book: string): Promise<string> {
+  async function invoiceDuplicate(id: string, book: string, item = '這張發票'): Promise<string> {
     if (book !== reviewBook.value) return ''
-    if (queued.value.some(batch => batch.book === book && batch.id === id)) return '重複匯入：這張發票已在待確認清單。'
+    if (queued.value.some(batch => batch.book === book && batch.id === id)) return '重複匯入：' + item + '已在待確認清單。'
     const booked = reviewTransactions.value.some(tx => tx.id === id + '-1')
     // Offline imports can still be reviewed; confirmation uses the same atomic marker.
-    if (booked || await hasTransactionBatch(state.spreadsheetId, id).catch(() => false)) return '重複匯入：這張發票已入帳。'
+    if (booked || await hasTransactionBatch(state.spreadsheetId, id).catch(() => false)) return '重複匯入：' + item + '已入帳。'
     return ''
   }
 
@@ -121,15 +121,16 @@ function createAppStore() {
   ): Promise<string | undefined> {
     if (drafts.length === 0) return
     return changeQueue(book, async (book) => {
-      const id = source.eventId ? await sourceBatchId(source.kind, source.eventId) : crypto.randomUUID().replaceAll('-', '')
-      if (source.kind === 'invoice' && source.eventId) {
-        const duplicate = await invoiceDuplicate(id, book)
+      const kind = source.kind === 'mail-invoice' && source.invoiceNumber ? 'invoice' : source.kind
+      const id = source.eventId ? await sourceBatchId(kind, source.eventId) : crypto.randomUUID().replaceAll('-', '')
+      if ((kind === 'invoice' || kind === 'mail-invoice' || kind === 'mail-card') && source.eventId) {
+        const duplicate = await invoiceDuplicate(id, book, kind === 'invoice' ? '這張發票' : '這封郵件')
         if (duplicate) throw new Error(duplicate)
       }
       if (queued.value.some(batch => batch.book === book && batch.id === id)) return id
       await persistQueue([
         ...queued.value,
-        { id, book, source: source.kind, invoiceNumber: source.invoiceNumber, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
+        { id, book, source: source.kind, mailDetail: source.mailDetail, invoiceNumber: source.invoiceNumber, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
       ])
       return id
     })
