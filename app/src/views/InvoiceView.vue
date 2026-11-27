@@ -5,16 +5,27 @@ import TransactionForm from '../components/TransactionForm.vue'
 import { useApp } from '../composables/useApp'
 import { invoiceCandidate, invoiceEventId, type InvoiceCandidate, type InvoiceInput } from '../invoice'
 import { receiptPlugin, nativeReceipts, sharedInvoice } from '../receiptInput'
-import { missingDraftFields } from '../review'
+import { missingDraftFields, validReviewDate } from '../review'
 
-const { stageDrafts, reviewBook, reviewBusy, state } = useApp()
+const { checkInvoiceImport, stageDrafts, reviewBook, reviewBusy, state } = useApp()
 const router = useRouter()
 const pasted = ref('')
 const candidate = ref<InvoiceCandidate>()
 const error = ref('')
+const duplicate = ref('')
 const reading = ref(false)
 let mounted = true
 onUnmounted(() => { mounted = false })
+
+watch(() => [candidate.value?.number, candidate.value?.draft.date, reviewBook.value] as const, async ([number, date, book], _, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  duplicate.value = ''
+  const normalized = number?.replace(/-/g, '').trim().toUpperCase() ?? ''
+  if (!book || !date || !validReviewDate(date) || !/^[A-Z]{2}\d{8}$/.test(normalized)) return
+  const message = await checkInvoiceImport(invoiceEventId(normalized, date)!, book)
+  if (current) duplicate.value = message
+})
 
 function read(input: InvoiceInput) {
   error.value = ''
@@ -80,6 +91,7 @@ async function stage() {
     <h1 class="page-title">匯入電子發票／收據</h1>
     <p class="page-sub">一次匯入一張，在裝置上讀取內容。核對後加入待確認清單，再確認入帳。</p>
     <button v-if="sharedInvoice" class="btn ghost" :disabled="reading || reviewBusy" @click="receiveShare">讀取新分享的收據</button>
+    <p v-if="duplicate" class="banner warn" role="status">{{ duplicate }}</p>
     <div v-if="error" class="banner error" role="alert">{{ error }}</div>
     <div v-if="!candidate" class="card stack">
       <template v-if="nativeReceipts">
@@ -98,7 +110,7 @@ async function stage() {
       <p v-if="missingDraftFields(candidate.draft, 'invoice').length" class="banner warn">
         待補：{{ missingDraftFields(candidate.draft, 'invoice').join('、') }}
       </p>
-      <TransactionForm v-model="candidate.draft" submit-label="加入待確認清單" :disabled="state.loading || reviewBusy"
+      <TransactionForm v-model="candidate.draft" submit-label="加入待確認清單" :disabled="state.loading || reviewBusy || !!duplicate"
         @submit="stage" @cancel="candidate = undefined; error = ''" />
     </div>
     <router-link to="/review">查看待確認清單</router-link>

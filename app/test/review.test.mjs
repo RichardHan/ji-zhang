@@ -260,6 +260,7 @@ test('numbered invoices deduplicate across receipt text, QR, reload and committe
   const id = await app.stageDrafts([parsed.draft], source)
   await app.hydrate()
   assert.equal(app.pendingBatches.value[0].invoiceNumber, parsed.number)
+  assert.match(await app.checkInvoiceImport(source.eventId, app.reviewBook.value), /已在待確認清單/)
   await assert.rejects(app.stageDrafts([parsed.draft], source), /已在待確認清單/)
   assert.equal(ledger.get(book).rows.length, 0)
   await app.confirmPendingBatch(id)

@@ -95,6 +95,25 @@ function createAppStore() {
     if (reviewBusy.value) throw new Error('正在處理待確認記錄，請稍候。')
   }
 
+  async function sourceBatchId(kind: ReviewSource['kind'], eventId: string): Promise<string> {
+    const bytes = new TextEncoder().encode(JSON.stringify([kind, eventId]))
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+    return Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  async function invoiceDuplicate(id: string, book: string): Promise<string> {
+    if (book !== reviewBook.value) return ''
+    if (queued.value.some(batch => batch.book === book && batch.id === id)) return '重複匯入：這張發票已在待確認清單。'
+    const booked = reviewTransactions.value.some(tx => tx.id === id + '-1')
+    // Offline imports can still be reviewed; confirmation uses the same atomic marker.
+    if (booked || await hasTransactionBatch(state.spreadsheetId, id).catch(() => false)) return '重複匯入：這張發票已入帳。'
+    return ''
+  }
+
+  async function checkInvoiceImport(eventId: string, book: string): Promise<string> {
+    return invoiceDuplicate(await sourceBatchId('invoice', eventId), book)
+  }
+
   async function stageDrafts(
     drafts: DraftTransaction[],
     source: ReviewSource,
@@ -102,23 +121,12 @@ function createAppStore() {
   ): Promise<string | undefined> {
     if (drafts.length === 0) return
     return changeQueue(book, async (book) => {
-      // Only opaque keys go into Sheets. The same source event must have the same key on every device.
-      const id = source.eventId
-        ? Array.from(new Uint8Array(await crypto.subtle.digest(
-          'SHA-256', new TextEncoder().encode(JSON.stringify([source.kind, source.eventId])),
-        )), (byte) => byte.toString(16).padStart(2, '0')).join('')
-        : crypto.randomUUID().replaceAll('-', '')
-      if (queued.value.some((batch) => batch.book === book && batch.id === id)) {
-        if (source.kind === 'invoice') throw new Error('重複匯入：這張發票已在待確認清單。')
-        return id
-      }
+      const id = source.eventId ? await sourceBatchId(source.kind, source.eventId) : crypto.randomUUID().replaceAll('-', '')
       if (source.kind === 'invoice' && source.eventId) {
-        const booked = reviewTransactions.value.some(tx => tx.id === id + '-1')
-        // Offline imports may still be reviewed. Atomic confirmation checks the same marker.
-        if (booked || await hasTransactionBatch(state.spreadsheetId, id).catch(() => false)) {
-          throw new Error('重複匯入：這張發票已入帳。')
-        }
+        const duplicate = await invoiceDuplicate(id, book)
+        if (duplicate) throw new Error(duplicate)
       }
+      if (queued.value.some(batch => batch.book === book && batch.id === id)) return id
       await persistQueue([
         ...queued.value,
         { id, book, source: source.kind, invoiceNumber: source.invoiceNumber, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
@@ -373,6 +381,7 @@ function createAppStore() {
     reviewError,
     pendingBatches,
     reviewTransactions,
+    checkInvoiceImport,
     stageDrafts,
     editPendingDraft,
     discardPendingBatch,
