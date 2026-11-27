@@ -22,8 +22,9 @@ export interface DraftTransaction {
 }
 
 export interface ReviewSource {
-  kind: 'manual' | 'ai-text' | 'voice' | 'photo'
+  kind: 'manual' | 'ai-text' | 'voice' | 'photo' | 'invoice'
   modelUsed?: string
+  invoiceNumber?: string
   eventId?: string
 }
 
@@ -33,6 +34,7 @@ export interface PendingBatch {
   source: ReviewSource['kind']
   modelUsed?: string
   drafts: DraftTransaction[]
+  invoiceNumber?: string
   submitted?: true
 }
 

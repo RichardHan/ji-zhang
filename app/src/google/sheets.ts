@@ -185,6 +185,13 @@ function toRow(tx: DraftTransaction & { id: string; createdAt: string }): (strin
   return [tx.date, tx.amount, tx.category, tx.account, tx.note, tx.type, tx.createdAt, tx.id]
 }
 
+export async function hasTransactionBatch(spreadsheetId: string, id: string): Promise<boolean> {
+  const meta = await api<SpreadsheetResource>(
+    `${SHEETS}/${spreadsheetId}?fields=namedRanges(namedRangeId)`,
+  )
+  return meta.namedRanges?.some(range => range.namedRangeId === `jz_batch_${id}`) ?? false
+}
+
 export async function commitTransactionBatch(
   spreadsheetId: string,
   batch: Pick<PendingBatch, 'id' | 'drafts'>,
@@ -220,10 +227,7 @@ export async function commitTransactionBatch(
     return 'written'
   } catch (err) {
     // A timeout/lost response and a concurrent confirmation can both leave a committed marker.
-    const meta = await api<SpreadsheetResource>(
-      `${SHEETS}/${spreadsheetId}?fields=namedRanges(namedRangeId)`,
-    ).catch(() => null)
-    if (meta?.namedRanges?.some((range) => range.namedRangeId === marker)) return 'already-written'
+    if (await hasTransactionBatch(spreadsheetId, batch.id).catch(() => false)) return 'already-written'
     throw err
   }
 }

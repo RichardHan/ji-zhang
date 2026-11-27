@@ -236,3 +236,39 @@ test('receipt review requires a merchant, date and actual TWD total; previews do
   assert.deepEqual(ledger.get(book).rows.map(row => row[1]), [120])
   assert.equal(app.receiptPreviews.has(id), false)
 })
+
+test('Ministry QR sample reads the tax-inclusive hex total and skips right-side item data', async () => {
+  const { invoiceCandidate } = await server.ssrLoadModule('/src/invoice.ts')
+  // Ministry of Finance QR specification, UTF-8 example in section 4.
+  const left = 'AB112233441020523999900000144000001540000000001234567ydXZt4LAN1UHN/j1juVcRA==:**********:3:3:1:乾電池:1:105:'
+  const right = '**口罩:1:210:牛奶:1:25'
+  const { number, draft } = invoiceCandidate({ codes: [right, left] })
+  assert.deepEqual([number, draft.date, draft.amount, draft.note], ['AB11223344', '2013-05-23', 340, ''])
+  assert.deepEqual(invoiceCandidate({ text: left }), { number, draft })
+  assert.throws(() => invoiceCandidate({ codes: [right] }), /左側/)
+  assert.throws(() => invoiceCandidate({ codes: [left.slice(0, 48)] }), /左側/)
+  assert.throws(() => invoiceCandidate({ codes: [left.replace('1020523', '1020230')] }), /日期/)
+  assert.throws(() => invoiceCandidate({ text: 'CD-11223344', codes: [left] }), /多張/)
+})
+
+test('numbered invoices deduplicate across receipt text, QR, reload and committed Sheets markers', async () => {
+  const { invoiceCandidate, invoiceEventId } = await server.ssrLoadModule('/src/invoice.ts')
+  const parsed = invoiceCandidate({ text: '商家：海山商店\n發票號碼 AB-11223344\n2013/05/23\n實付 340' })
+  assert.deepEqual([parsed.number, parsed.draft.date, parsed.draft.amount, parsed.draft.note],
+    ['AB11223344', '2013-05-23', 340, '海山商店'])
+  const source = { kind: 'invoice', invoiceNumber: parsed.number, eventId: invoiceEventId(parsed.number, parsed.draft.date) }
+  const id = await app.stageDrafts([parsed.draft], source)
+  await app.hydrate()
+  assert.equal(app.pendingBatches.value[0].invoiceNumber, parsed.number)
+  await assert.rejects(app.stageDrafts([parsed.draft], source), /已在待確認清單/)
+  assert.equal(ledger.get(book).rows.length, 0)
+  await app.confirmPendingBatch(id)
+  assert.equal(ledger.get(book).rows.length, 1)
+  // The commit marker survives even if another device has deleted the row.
+  ledger.get(book).rows.length = 0
+  await app.hydrate()
+  await assert.rejects(app.stageDrafts([parsed.draft], source), /已入帳/)
+  assert.equal(app.pendingBatches.value.length, 0)
+  assert.notEqual(invoiceEventId(parsed.number, '2013-07-01'), source.eventId)
+  assert.equal(invoiceEventId('', parsed.draft.date), undefined)
+})

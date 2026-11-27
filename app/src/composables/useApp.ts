@@ -13,6 +13,7 @@ import {
   deleteTransaction,
   ensureSheet,
   listTransactions,
+  hasTransactionBatch,
   parseSpreadsheetId,
   spreadsheetUrl,
   updateTransaction,
@@ -107,10 +108,20 @@ function createAppStore() {
           'SHA-256', new TextEncoder().encode(JSON.stringify([source.kind, source.eventId])),
         )), (byte) => byte.toString(16).padStart(2, '0')).join('')
         : crypto.randomUUID().replaceAll('-', '')
-      if (queued.value.some((batch) => batch.book === book && batch.id === id)) return id
+      if (queued.value.some((batch) => batch.book === book && batch.id === id)) {
+        if (source.kind === 'invoice') throw new Error('重複匯入：這張發票已在待確認清單。')
+        return id
+      }
+      if (source.kind === 'invoice' && source.eventId) {
+        const booked = reviewTransactions.value.some(tx => tx.id === id + '-1')
+        // Offline imports may still be reviewed. Atomic confirmation checks the same marker.
+        if (booked || await hasTransactionBatch(state.spreadsheetId, id).catch(() => false)) {
+          throw new Error('重複匯入：這張發票已入帳。')
+        }
+      }
       await persistQueue([
         ...queued.value,
-        { id, book, source: source.kind, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
+        { id, book, source: source.kind, invoiceNumber: source.invoiceNumber, modelUsed: source.modelUsed, drafts: drafts.map((draft) => ({ ...draft })) },
       ])
       return id
     })

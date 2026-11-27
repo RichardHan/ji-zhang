@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApp } from './composables/useApp'
+
+import { receiptPlugin, nativeReceipts, sharedInvoice } from './receiptInput'
+import type { PluginListenerHandle } from '@capacitor/core'
 
 const { state, hasSheet, hydrate } = useApp()
 const route = useRoute()
@@ -15,13 +18,22 @@ function maybeRedirect() {
   if (needsSetup && route.name !== 'setup') {
     router.replace({ name: 'setup' })
   } else if (!needsSetup && route.name === 'setup') {
-    router.replace({ name: 'home' })
+    router.replace({ name: sharedInvoice.value ? 'invoice' : 'home' })
   }
 }
+
+const shareListener = nativeReceipts ? receiptPlugin.addListener('sharedInvoice', (share) => {
+  sharedInvoice.value = share
+  if (state.ready && state.signedIn && hasSheet.value && route.name !== 'invoice') {
+    void router.push({ name: 'invoice' })
+  }
+}) : undefined
+onUnmounted(() => { void shareListener?.then((listener: PluginListenerHandle) => listener.remove()) })
 
 onMounted(async () => {
   await hydrate()
   maybeRedirect()
+  if (sharedInvoice.value && state.signedIn && hasSheet.value) await router.replace({ name: 'invoice' })
 })
 
 watch(

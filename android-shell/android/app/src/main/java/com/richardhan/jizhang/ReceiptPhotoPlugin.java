@@ -31,6 +31,18 @@ import java.io.InputStream;
 public final class ReceiptPhotoPlugin extends Plugin {
     private boolean selecting;
 
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        if (!Intent.ACTION_SEND.equals(intent.getAction()) || !"text/plain".equals(intent.getType())) return;
+        CharSequence text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
+        if (text == null) return;
+        intent.removeExtra(Intent.EXTRA_TEXT);
+        JSObject shared = new JSObject();
+        if (text.length() > InvoiceDocument.MAX_TEXT) shared.put("error", "分享文字過長，請一次匯入一張發票。");
+        else shared.put("text", text.toString());
+        getBridge().execute(() -> notifyListeners("sharedInvoice", shared, true));
+    }
+
     private File captureFile() {
         return new File(getContext().getCacheDir(), "pending-receipt-camera.jpg");
     }
@@ -58,7 +70,13 @@ public final class ReceiptPhotoPlugin extends Plugin {
                     intent.putExtra(MediaStore.EXTRA_OUTPUT, uri);
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
                 } else {
-                    intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+                    intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE);
+                    if (call.getBoolean("invoice", false)) {
+                        intent.setType("*/*").putExtra(Intent.EXTRA_MIME_TYPES,
+                                new String[] {"image/*", "text/plain", "application/pdf"});
+                    } else {
+                        intent.setType("image/*");
+                    }
                 }
                 selecting = true;
                 startActivityForResult(call, intent, "onPhoto");
@@ -88,6 +106,22 @@ public final class ReceiptPhotoPlugin extends Plugin {
                         || (getContext().getPackageName() + ".fileprovider").equals(uri.getAuthority()))) {
                     throw new IOException();
                 }
+                if (call.getBoolean("invoice", false)) {
+                    String type = camera ? "image/jpeg" : getContext().getContentResolver().getType(uri);
+                    if ("application/pdf".equals(type) || "text/plain".equals(type)) {
+                        call.resolve(InvoiceDocument.read(getContext().getContentResolver(), uri, type));
+                    } else if (type != null && type.startsWith("image/")) {
+                        Bitmap image = decode(uri);
+                        try {
+                            call.resolve(InvoiceDocument.readImage(image));
+                        } finally {
+                            image.recycle();
+                        }
+                    } else {
+                        call.reject("請選取 TXT、PDF 或發票圖片。");
+                    }
+                    return;
+                }
                 Bitmap bitmap = decode(uri);
                 ByteArrayOutputStream preview = new ByteArrayOutputStream();
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 78, preview);
@@ -103,6 +137,8 @@ public final class ReceiptPhotoPlugin extends Plugin {
                     bitmap.recycle();
                 }
                 call.resolve(response);
+            } catch (InvoiceDocument.ImportException e) {
+                call.reject(e.getMessage());
             } catch (IOException | RuntimeException e) {
                 call.reject("無法讀取這張照片，請重拍或選取其他影像。");
             } finally {
