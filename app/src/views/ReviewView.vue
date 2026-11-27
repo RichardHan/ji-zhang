@@ -4,7 +4,13 @@ import TransactionForm from '../components/TransactionForm.vue'
 import { useApp } from '../composables/useApp'
 import { formatTWD } from '../dates'
 import { missingDraftFields, similarTransactionKey, validReviewAmount } from '../review'
-import type { DraftTransaction } from '../types'
+import type { DraftTransaction, ReviewSource } from '../types'
+
+const sourceLabels = {
+  manual: '手動輸入',
+  'ai-text': 'AI 文字解析',
+  voice: '語音輸入',
+} satisfies Record<ReviewSource['kind'], string>
 
 const {
   state, reviewBook, reviewBusy, reviewError, pendingBatches, reviewTransactions,
@@ -106,7 +112,7 @@ function stopRetry(id: string) {
     <p v-for="warning in warnings" :key="warning" class="banner warn" role="status">{{ warning }}</p>
     <p v-if="!batches.length && !reviewError" class="muted">沒有待確認的記錄。</p>
     <section v-for="{ batch, rows, hasDuplicates, needsInput } in batches" :key="batch.id" class="card stack">
-      <h2 style="margin: 0; font-size: 1rem">{{ batch.source === 'manual' ? '手動輸入' : 'AI 文字解析' }}</h2>
+      <h2 style="margin: 0; font-size: 1rem">{{ sourceLabels[batch.source] }}</h2>
       <small v-if="batch.modelUsed" class="muted">模型：{{ batch.modelUsed }}</small>
       <p v-if="batch.submitted" class="banner warn" role="status">
         這批已嘗試寫入。如果上次結果不明，可以安全重試；不會重複入帳。

@@ -1,6 +1,7 @@
 package com.richardhan.jizhang;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
@@ -11,6 +12,12 @@ import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 
 // Required so Google API scopes (Sheets) can complete authorization on Android.
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(BookkeepingSpeechPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
