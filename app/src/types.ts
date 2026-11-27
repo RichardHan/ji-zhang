@@ -21,6 +21,25 @@ export interface DraftTransaction {
   type: TxType
 }
 
+export interface ReviewSource {
+  kind: 'manual' | 'ai-text' | 'voice' | 'photo' | 'invoice' | 'mail-invoice' | 'mail-card'
+  modelUsed?: string
+  mailDetail?: string
+  invoiceNumber?: string
+  eventId?: string
+}
+
+export interface PendingBatch {
+  id: string
+  book: string
+  source: ReviewSource['kind']
+  modelUsed?: string
+  drafts: DraftTransaction[]
+  mailDetail?: string
+  invoiceNumber?: string
+  submitted?: true
+}
+
 export interface UserProfile {
   email: string
   name: string
