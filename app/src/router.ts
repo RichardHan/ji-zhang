@@ -5,6 +5,7 @@ import SummaryView from './views/SummaryView.vue'
 import SettingsView from './views/SettingsView.vue'
 import AddView from './views/AddView.vue'
 import ReviewView from './views/ReviewView.vue'
+import InvoiceView from './views/InvoiceView.vue'
 import SetupView from './views/SetupView.vue'
 
 export const router = createRouter({
@@ -16,6 +17,7 @@ export const router = createRouter({
     { path: '/settings', name: 'settings', component: SettingsView, meta: { tab: 'settings' } },
     { path: '/add', name: 'add', component: AddView, meta: { tab: 'home' } },
     { path: '/review', name: 'review', component: ReviewView, meta: { tab: 'home' } },
+    { path: '/invoice', name: 'invoice', component: InvoiceView, meta: { tab: 'home' } },
     { path: '/setup', name: 'setup', component: SetupView, meta: { bare: true } },
   ],
 })

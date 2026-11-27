@@ -11,6 +11,7 @@ const sourceLabels = {
   'ai-text': 'AI 文字解析',
   voice: '語音輸入',
   photo: '收據照片',
+  invoice: '電子發票／收據',
 } satisfies Record<ReviewSource['kind'], string>
 
 const {
@@ -114,6 +115,7 @@ function stopRetry(id: string) {
     <p v-if="!batches.length && !reviewError" class="muted">沒有待確認的記錄。</p>
     <section v-for="{ batch, rows, hasDuplicates, needsInput } in batches" :key="batch.id" class="card stack">
       <h2 style="margin: 0; font-size: 1rem">{{ sourceLabels[batch.source] }}</h2>
+      <small v-if="batch.invoiceNumber">發票號碼 {{ batch.invoiceNumber }}</small>
       <details v-if="receiptPreviews.has(batch.id)" open>
         <summary>核對收據照片</summary>
         <img :src="receiptPreviews.get(batch.id)" alt="本次收據照片" style="width: 100%; max-height: 42vh; object-fit: contain" />
