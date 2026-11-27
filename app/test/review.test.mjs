@@ -244,6 +244,8 @@ test('Ministry QR sample reads the tax-inclusive hex total and skips right-side 
   const right = '**口罩:1:210:牛奶:1:25'
   const { number, draft } = invoiceCandidate({ codes: [right, left] })
   assert.deepEqual([number, draft.date, draft.amount, draft.note], ['AB11223344', '2013-05-23', 340, ''])
+  assert.equal(invoiceCandidate({ text: '回刺回', codes: [left, right] }).draft.note, '')
+  assert.equal(invoiceCandidate({ text: '商家：海山茶舖', codes: [left] }).draft.note, '海山茶舖')
   assert.deepEqual(invoiceCandidate({ text: left }), { number, draft })
   assert.throws(() => invoiceCandidate({ codes: [right] }), /左側/)
   assert.throws(() => invoiceCandidate({ codes: [left.slice(0, 48)] }), /左側/)

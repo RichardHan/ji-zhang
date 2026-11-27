@@ -3,6 +3,7 @@ package com.richardhan.jizhang;
 import android.content.ContentResolver;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.pdf.PdfRenderer;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
@@ -14,6 +15,7 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
 import com.google.mlkit.vision.barcode.BarcodeScanning;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions;
@@ -21,6 +23,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 final class InvoiceDocument {
     static final int MAX_TEXT = 65536;
@@ -78,12 +82,22 @@ final class InvoiceDocument {
         try (BarcodeScanner scanner = BarcodeScanning.getClient(options);
              TextRecognizer ocr = TextRecognition.getClient(new ChineseTextRecognizerOptions.Builder().build())) {
             JSArray codes = new JSArray();
+            List<Rect> barcodeAreas = new ArrayList<>();
             for (Barcode code : Tasks.await(scanner.process(input))) {
+                Rect bounds = code.getBoundingBox();
+                if (bounds != null) barcodeAreas.add(bounds);
                 if (code.getRawValue() != null) codes.put(code.getRawValue());
                 else if (code.getRawBytes() != null) codes.put(new String(code.getRawBytes(), StandardCharsets.ISO_8859_1));
             }
-            String text = Tasks.await(ocr.process(input)).getText();
-            return new JSObject().put("codes", codes).put("text", text);
+            StringBuilder printed = new StringBuilder();
+            for (Text.TextBlock block : Tasks.await(ocr.process(input)).getTextBlocks()) {
+                for (Text.Line line : block.getLines()) {
+                    Rect bounds = line.getBoundingBox();
+                    if (bounds != null && barcodeAreas.stream().anyMatch(area -> Rect.intersects(area, bounds))) continue;
+                    printed.append(line.getText()).append('\n');
+                }
+            }
+            return new JSObject().put("codes", codes).put("text", printed.toString());
         } catch (Exception e) {
             throw new ImportException("無法辨識發票，請重拍或貼上收據文字。");
         }

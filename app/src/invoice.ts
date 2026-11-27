@@ -28,6 +28,9 @@ export function invoiceCandidate({ text = '', codes = [] }: InvoiceInput): Invoi
     const [, , year, month, day, total] = receipts[0]
     const date = [Number(year) + 1911, month, day].join('-')
     if (!validReviewDate(date)) throw new Error('發票 QR Code 日期無效，請重新掃描。')
+    // OCR occasionally invents a shop header from a QR-only image.
+    const labeledMerchant = /^(商家|店名|商店名稱|merchant)\s*[:：]/im.test(plain)
+    if (!labeledMerchant && !draft.date && !draft.amount && !Array.from(plain.matchAll(printedNumber)).length) draft.note = ''
     draft.date = date
     draft.amount = parseInt(total, 16)
   } else if (payloads.size && !numbers.size && !draft.date && !draft.amount) {
