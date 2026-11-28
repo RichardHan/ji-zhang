@@ -1,6 +1,4 @@
 import {
-  DEFAULT_MODEL,
-  FALLBACK_MODEL,
   PREFERRED_FREE_TEXT_MODELS,
   PREFERRED_FREE_VISION_MODELS,
 } from '../constants'
@@ -106,7 +104,7 @@ export function rankFreeCandidates(models: CatalogModel[], kind: ModelKind): str
 export function fallbackCandidateIds(kind: ModelKind): string[] {
   const preferred: string[] =
     kind === 'vision' ? [...PREFERRED_FREE_VISION_MODELS] : [...PREFERRED_FREE_TEXT_MODELS]
-  return uniqueIds([...preferred, DEFAULT_MODEL, FALLBACK_MODEL])
+  return uniqueIds(preferred)
 }
 
 function parseCached(json: string): CatalogModel[] | null {
@@ -178,14 +176,15 @@ export async function resolveModelCandidates(
     if (!id) throw new Error(kind === 'vision' ? '請先在設定裡選擇視覺模型。' : '請先在設定裡選擇文字模型。')
     return { ids: [id], source: 'manual' }
   }
+  let models: CatalogModel[]
   try {
-    const models = await listOpenRouterModels()
-    const ids = rankFreeCandidates(models, kind)
-    if (ids.length) return { ids, source: 'catalog' }
+    models = await listOpenRouterModels()
   } catch {
-    // Fall through to the hardcoded free list so first-run still works offline.
+    return { ids: fallbackCandidateIds(kind), source: 'fallback' }
   }
-  return { ids: fallbackCandidateIds(kind), source: 'fallback' }
+  const ids = rankFreeCandidates(models, kind)
+  if (!ids.length) throw new Error(kind === 'vision' ? '目前清單沒有免費的圖片模型。' : '目前清單沒有免費的文字模型。')
+  return { ids, source: 'catalog' }
 }
 
 export function findCatalogModel(models: CatalogModel[], id: string): CatalogModel | undefined {

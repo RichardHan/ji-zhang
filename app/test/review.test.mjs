@@ -512,3 +512,15 @@ test('automatic local-to-cloud fallback stays free even with a saved paid manual
   await parseText({aiProvider:'auto',apiKey:'fixture',textModelMode:'manual',textModel:'vendor/paid'},'午餐')
   assert.deepEqual(tried,['vendor/fixture:free'])
 })
+
+test('image parsing cannot route to text-only models when the catalog has no eligible vision provider', async t => {
+  const {resolveModelCandidates, fallbackCandidateIds} = await server.ssrLoadModule('/src/ai/openrouter-models.ts')
+  const {FALLBACK_MODEL} = await server.ssrLoadModule('/src/constants.ts')
+  await storage.setModelsCache('', 0)
+  t.mock.method(globalThis,'fetch',async () => Response.json({data:[
+    {id:'vendor/text:free',architecture:{input_modalities:['text']}},
+    {id:'vendor/vision-paid',pricing:{prompt:'1',completion:'1'},architecture:{input_modalities:['text','image']}},
+  ]}))
+  await assert.rejects(resolveModelCandidates('vision','auto-free',''),/沒有免費的圖片模型/)
+  assert.ok(!fallbackCandidateIds('vision').includes(FALLBACK_MODEL))
+})

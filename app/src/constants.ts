@@ -28,7 +28,6 @@ export const PREFERRED_FREE_TEXT_MODELS = [
 /** Preferred free models, tried first when auto-pick is on (vision / receipts). */
 export const PREFERRED_FREE_VISION_MODELS = [
   DEFAULT_MODEL,
-  FALLBACK_MODEL,
   'google/gemma-4-31b-it:free',
   'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
 ] as const
