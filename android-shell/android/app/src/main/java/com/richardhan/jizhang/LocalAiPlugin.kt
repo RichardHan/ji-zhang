@@ -164,7 +164,7 @@ class LocalAiPlugin : Plugin() {
         activeBackend = ""
     }
 
-    private fun ensureEngineLocked(spec: ModelSpec): Engine {
+    private fun ensureEngineLocked(spec: ModelSpec, cpuOnly: Boolean = false): Engine {
         val file = modelFile(spec)
         if (!file.exists() || file.length() != spec.expectedBytes) {
             throw IllegalStateException("尚未下載本機模型「${spec.name}」，請先到設定下載。")
@@ -177,10 +177,8 @@ class LocalAiPlugin : Plugin() {
         closeEngineLocked()
 
         val cachePath = File(context.cacheDir, "litert-lm").apply { mkdirs() }.absolutePath
-        val candidates = listOf(
-            "GPU" to Backend.GPU(),
-            "CPU" to Backend.CPU(),
-        )
+        val cpu = "CPU" to Backend.CPU()
+        val candidates = if (cpuOnly) listOf(cpu) else listOf("GPU" to Backend.GPU(), cpu)
         var lastError: Throwable? = null
         for ((label, backend) in candidates) {
             try {
@@ -208,6 +206,21 @@ class LocalAiPlugin : Plugin() {
             lastError,
         )
     }
+
+    private suspend fun infer(spec: ModelSpec, generate: (Engine) -> String): Pair<String, String> =
+        engineMutex.withLock {
+            val engine = ensureEngineLocked(spec)
+            val text = try {
+                generate(engine)
+            } catch (error: Exception) {
+                if (activeBackend != "GPU") throw error
+                // GPU drivers can defer kernel compilation until the first message.
+                Log.w(TAG, "GPU inference unavailable for ${spec.id}; retrying on CPU")
+                closeEngineLocked()
+                generate(ensureEngineLocked(spec, cpuOnly = true))
+            }
+            text to activeBackend
+        }
 
     private fun extractMessageText(message: Message): String {
         val parts = message.contents.contents.filterIsInstance<Content.Text>()
@@ -546,8 +559,7 @@ class LocalAiPlugin : Plugin() {
                     return@launch
                 }
 
-                val out = engineMutex.withLock {
-                    val engine = ensureEngineLocked(spec)
+                val (out, backend) = infer(spec) { engine ->
                     val convConfig = ConversationConfig(
                         systemInstruction = if (systemPrompt.isNotEmpty()) Contents.of(systemPrompt) else null,
                         samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.2, seed = 42),
@@ -562,7 +574,7 @@ class LocalAiPlugin : Plugin() {
                 call.resolve(
                     JSObject().apply {
                         put("text", out)
-                        put("modelUsed", "${spec.id} ($activeBackend)")
+                        put("modelUsed", "${spec.id} ($backend)")
                         put("runtime", "litert")
                     },
                 )
@@ -630,8 +642,7 @@ class LocalAiPlugin : Plugin() {
                     }
                     bitmap.recycle()
 
-                    val out = engineMutex.withLock {
-                        val engine = ensureEngineLocked(spec)
+                    val (out, backend) = infer(spec) { engine ->
                         val convConfig = ConversationConfig(
                             systemInstruction = if (systemPrompt.isNotEmpty()) Contents.of(systemPrompt) else null,
                             samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.2, seed = 42),
@@ -651,7 +662,7 @@ class LocalAiPlugin : Plugin() {
                     call.resolve(
                         JSObject().apply {
                             put("text", out)
-                            put("modelUsed", "${spec.id} ($activeBackend)")
+                            put("modelUsed", "${spec.id} ($backend)")
                             put("runtime", "litert")
                         },
                     )
