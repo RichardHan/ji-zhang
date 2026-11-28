@@ -17,6 +17,7 @@ export const router = createRouter({
     { path: '/settings', name: 'settings', component: SettingsView, meta: { tab: 'settings' } },
     { path: '/add', name: 'add', component: AddView, meta: { tab: 'home' } },
     { path: '/review', name: 'review', component: ReviewView, meta: { tab: 'home' } },
+    { path: '/location', name: 'location', component: () => import('./views/LocationView.vue'), meta: { tab: 'home' } },
     { path: '/video', name: 'video', component: () => import('./views/VideoView.vue'), meta: { tab: 'home' } },
     { path: '/mail', name: 'mail', component: () => import('./views/MailView.vue'), meta: { tab: 'home' } },
     { path: '/invoice', name: 'invoice', component: InvoiceView, meta: { tab: 'home' } },

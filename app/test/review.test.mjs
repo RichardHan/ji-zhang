@@ -368,3 +368,82 @@ test('video transcription sends only the selected audio track and reads the tran
   })
   assert.equal(await transcribeVideoAudio('fixture', 'YXVkaW8=', signal), '午餐 120 元')
 })
+
+const lunch = Date.parse('2026-11-28T12:00:00+08:00')
+const minute = 60000
+const point = (time, offset = 0, speed = 0, accuracy = 5) => ({
+  time: lunch + time, lat: 25.033, lon: 121.5654 + offset / 100000, accuracy, speed,
+})
+async function simulatedStay(driving, walking) {
+  const { StayDetector } = await server.ssrLoadModule('/src/stay.ts')
+  const detector = new StayDetector()
+  if (driving) {
+    detector.update(point(-80000, -145))
+    detector.update(point(-70000, -65, 8))
+  }
+  if (walking) for (let i = 1; i <= 5; i++) detector.update(point(-70000 + i * 10000, -65 + 13 * i, 1.3))
+  const visits = []
+  for (let i = 0; i < 22; i++) {
+    const visit = detector.update(point(i * minute))
+    if (visit) visits.push(visit)
+  }
+  assert.equal(visits.length, 1)
+  return visits[0]
+}
+
+test('one lunch stop offers parking and different meal options with no assumed amount', async () => {
+  const { choicesFor } = await server.ssrLoadModule('/src/stay.ts')
+  const stop = await simulatedStay(true, true)
+  const places = [{ kind: 'parking', name: '公共停車場' }, { kind: 'meal', name: '麵店', cuisine: 'ramen' },
+    { kind: 'meal', name: '茶屋' }]
+  const choices = choicesFor(stop, [...places, places[0]])
+  assert.equal(choices.length, 3)
+  assert.ok(choices.every(c => c.draft.amount === 0 && c.draft.date === '2026-11-28'))
+  assert.match(choices[1].label, /午餐.*麵店.*拉麵/)
+  assert.equal(ledger.get(book).rows.length, 0)
+  const id = await app.stageDrafts([choices[1].draft], { kind: 'location' })
+  await assert.rejects(app.confirmPendingBatch(id), /補齊/)
+  assert.doesNotMatch(JSON.stringify(await storage.getPendingBatches()), /121\.565|latitude|longitude|accuracy/)
+  await app.discardPendingBatch(id)
+  assert.equal(ledger.get(book).rows.length, 0)
+  const second = await app.stageDrafts([choices[1].draft], { kind: 'location' })
+  await app.editPendingDraft(second, 0, { ...choices[1].draft, amount: 145, note: '實際餐點' })
+  await app.confirmPendingBatch(second)
+  assert.equal(ledger.get(book).rows.length, 1)
+})
+
+test('passing, weak or interrupted fixes and a vehicle stopped in traffic do not infer lunch', async () => {
+  const { choicesFor, StayDetector } = await server.ssrLoadModule('/src/stay.ts')
+  const meal = [{ kind: 'meal', name: '麵店' }]
+  const traffic = await simulatedStay(true, false)
+  assert.deepEqual(choicesFor(traffic, meal), [])
+  const stationary = await simulatedStay(false, false)
+  assert.equal(choicesFor(stationary, meal).length, 1)
+  assert.deepEqual(choicesFor(stationary, [{ kind: 'parking', name: '停車場' }]), [])
+  assert.deepEqual(choicesFor({ ...stationary, start: lunch + 3 * 3600000 }, meal), [])
+  assert.deepEqual(choicesFor(stationary, []), [])
+  for (const generate of [i => point(i * minute, i * 55, 0.9), i => point(i * minute, 0, 0, 100), i => point(i * 3 * minute)]) {
+    const detector = new StayDetector()
+    for (let i = 0; i < 35; i++) assert.equal(detector.update(generate(i)), undefined)
+  }
+})
+
+test('lookup limits place geometry, filters free parking and withholds restaurant guesses on a traffic lane', async t => {
+  const { nearbyPlaces } = await server.ssrLoadModule('/src/stay.ts')
+  const stop = await simulatedStay(true, true)
+  const node = (id, lon, tags) => ({ type: 'node', id, lat: stop.lat, lon, tags })
+  const elements = [node(1, stop.lon, { amenity: 'restaurant', name: '麵店' }),
+    node(2, stop.lon, { amenity: 'parking', fee: 'no' }), node(3, stop.lon + .1, { amenity: 'cafe' }),
+    node(4, stop.lon + .01), node(5, stop.lon - .01),
+    { type: 'way', id: 7, nodes: [4, 5], tags: { 'parking:right:fee': 'yes', name: '中正路' } }]
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    assert.equal(new URL(url).hostname, 'api.openstreetmap.org')
+    assert.equal(new URL(url).searchParams.size, 1)
+    assert.equal(init.credentials, 'omit')
+    return Response.json({ elements })
+  })
+  const read = () => nearbyPlaces(stop, new AbortController().signal)
+  assert.deepEqual((await read()).map(p => p.name), ['麵店', '中正路'])
+  elements.at(-1).tags.highway = 'primary'
+  assert.deepEqual((await read()).map(p => p.name), ['中正路'])
+})
