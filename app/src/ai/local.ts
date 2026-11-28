@@ -97,7 +97,7 @@ export class LocalProvider implements AiProvider {
     }
   }
 
-  async monthlyInsight(summary: MonthInsightInput): Promise<string> {
+  async monthlyInsight(summary: MonthInsightInput) {
     const lines = summary.byCategory
       .map((c) => `${c.category} ${Math.round(c.amount)} 元`)
       .join('、')
@@ -110,6 +110,6 @@ export class LocalProvider implements AiProvider {
     })
     const out = res.text.trim()
     if (!out) throw new Error('無法產生分析')
-    return out
+    return { text: out }
   }
 }

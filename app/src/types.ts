@@ -28,6 +28,27 @@ export interface DraftTransaction {
   type: TxType
 }
 
+export interface ReviewSource {
+  kind: 'location' | 'manual' | 'video' | 'ai-text' | 'voice' | 'photo' | 'invoice' | 'mail-invoice' | 'mail-card'
+  notice?: string
+  modelUsed?: string
+  mailDetail?: string
+  invoiceNumber?: string
+  eventId?: string
+}
+
+export interface PendingBatch {
+  id: string
+  book: string
+  source: ReviewSource['kind']
+  notice?: string
+  modelUsed?: string
+  drafts: DraftTransaction[]
+  mailDetail?: string
+  invoiceNumber?: string
+  submitted?: true
+}
+
 export interface UserProfile {
   email: string
   name: string

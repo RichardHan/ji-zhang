@@ -37,10 +37,11 @@ export function isFreePricing(id: string, promptPrice: number, completionPrice: 
 export function parseCatalogModel(raw: RawModel): CatalogModel | null {
   const id = String(raw.id ?? '').trim()
   if (!id) return null
-  const promptPrice = Number(raw.pricing?.prompt ?? NaN)
-  const completionPrice = Number(raw.pricing?.completion ?? NaN)
-  const prompt = Number.isFinite(promptPrice) ? promptPrice : 0
-  const completion = Number.isFinite(completionPrice) ? completionPrice : 0
+  function price(value?: string): number {
+    return value != null && String(value).trim() !== '' ? Number(value) : NaN
+  }
+  const prompt = price(raw.pricing?.prompt)
+  const completion = price(raw.pricing?.completion)
   const modalities = (raw.architecture?.input_modalities ?? []).map((m) => String(m).toLowerCase())
   return {
     id,
@@ -54,7 +55,8 @@ export function parseCatalogModel(raw: RawModel): CatalogModel | null {
 }
 
 export function formatUsdPerMillion(perToken: number): string {
-  if (!Number.isFinite(perToken) || perToken <= 0) return '免費'
+  if (!Number.isFinite(perToken) || perToken < 0) return '價格未提供'
+  if (perToken === 0) return '免費'
   const perMillion = perToken * 1_000_000
   if (perMillion < 0.01) return `$${perMillion.toPrecision(2)}`
   if (perMillion < 1) return `$${perMillion.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
@@ -114,6 +116,7 @@ function parseCached(json: string): CatalogModel[] | null {
     const models: CatalogModel[] = []
     for (const item of data) {
       if (!item || typeof item !== 'object') continue
+      if ('promptPrice' in item) return null // Older caches lost raw pricing and modalities.
       const parsed = parseCatalogModel(item as RawModel)
       if (parsed) models.push(parsed)
     }
@@ -149,7 +152,7 @@ async function fetchCatalog(): Promise<CatalogModel[]> {
     if (parsed) models.push(parsed)
   }
   if (!models.length) throw new Error('OpenRouter 模型清單是空的。')
-  await storage.setModelsCache(JSON.stringify(models), Date.now())
+  await storage.setModelsCache(JSON.stringify(raw.map(({id, name, pricing, architecture, context_length}) => ({id, name, pricing, architecture, context_length}))), Date.now())
   return models
 }
 

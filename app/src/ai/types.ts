@@ -51,7 +51,7 @@ export interface AiProvider {
   isAvailable(): Promise<boolean>
   parseText(input: string): Promise<ParseResult>
   parseImage(imageDataUrl: string, hint?: string): Promise<ParseResult>
-  monthlyInsight(summary: MonthInsightInput): Promise<string>
+  monthlyInsight(summary: MonthInsightInput): Promise<{ text: string; notice?: string }>
 }
 
 export interface LocalModelSpec {

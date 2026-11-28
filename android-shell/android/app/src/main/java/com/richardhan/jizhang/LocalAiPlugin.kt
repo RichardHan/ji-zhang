@@ -56,6 +56,7 @@ class LocalAiPlugin : Plugin() {
         val fileName: String,
         val url: String,
         val expectedBytes: Long,
+        val sha256: String,
     )
 
     companion object {
@@ -68,15 +69,17 @@ class LocalAiPlugin : Plugin() {
                 id = "gemma-4-e2b",
                 name = "Gemma 4 E2B（預設，中文與收據較準）",
                 fileName = "gemma-4-E2B-it.litertlm",
-                url = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+                url = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/2e12bfd869b2962984f97a1f2a26807316d534cc/gemma-4-E2B-it.litertlm",
                 expectedBytes = 2_588_147_712L,
+                sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
             ),
             ModelSpec(
                 id = "qwen3.5-0.8b-vl",
                 name = "Qwen 3.5 0.8B VL（輕量備選，省空間）",
                 fileName = "Qwen3.5-0.8B-VL_int8.litertlm",
-                url = "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B-VL_int8.litertlm",
+                url = "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/7c656dc9e84b135df6b702e54fbe14a05c67abb8/Qwen3.5-0.8B-VL_int8.litertlm",
                 expectedBytes = 1_303_724_032L,
+                sha256 = "7413f51eafb82e7cf0b707fa506eddfc76c10433b26fa8f0dc2f051970d2feb5",
             ),
         )
 
@@ -163,7 +166,7 @@ class LocalAiPlugin : Plugin() {
 
     private fun ensureEngineLocked(spec: ModelSpec): Engine {
         val file = modelFile(spec)
-        if (!file.exists() || file.length() <= 0L) {
+        if (!file.exists() || file.length() != spec.expectedBytes) {
             throw IllegalStateException("尚未下載本機模型「${spec.name}」，請先到設定下載。")
         }
         val path = file.absolutePath
@@ -257,7 +260,7 @@ class LocalAiPlugin : Plugin() {
             val finalFile = modelFile(spec)
             val part = partFile(spec)
             val isDownloadingThis = downloadActive.get() && downloadingModelId == spec.id
-            val available = !isDownloadingThis && finalFile.exists() && finalFile.length() > 0L
+            val available = !isDownloadingThis && finalFile.exists() && finalFile.length() == spec.expectedBytes
             val downloaded = when {
                 isDownloadingThis -> downloadedBytesLive
                 available -> finalFile.length()
@@ -317,12 +320,13 @@ class LocalAiPlugin : Plugin() {
             var conn: HttpURLConnection? = null
             try {
                 val finalFile = modelFile(spec)
-                if (finalFile.exists() && finalFile.length() > 0L) {
+                if (finalFile.exists() && finalFile.length() == spec.expectedBytes) {
                     call.resolve()
                     return@launch
                 }
 
                 val part = partFile(spec)
+                if (part.length() >= spec.expectedBytes && !part.delete()) throw IllegalStateException("無法重設暫存檔。")
                 val existingBytes = if (part.exists()) part.length() else 0L
                 val remaining = (spec.expectedBytes - existingBytes).coerceAtLeast(0L)
                 val free = freeStorageBytes()
@@ -348,11 +352,13 @@ class LocalAiPlugin : Plugin() {
 
                 val append = code == HttpURLConnection.HTTP_PARTIAL && existingBytes > 0L
                 var currentBytes = if (append) existingBytes else 0L
-                val contentLength = conn.contentLengthLong
-                val totalBytes = when {
-                    append && contentLength > 0L -> existingBytes + contentLength
-                    contentLength > 0L -> contentLength
-                    else -> spec.expectedBytes
+                val totalBytes = spec.expectedBytes
+                if (code == HttpURLConnection.HTTP_PARTIAL &&
+                    conn.getHeaderField("Content-Range") != "bytes $currentBytes-${totalBytes - 1}/$totalBytes") {
+                    throw IllegalStateException("伺服器回傳的續傳範圍不符。")
+                }
+                if (conn.contentLengthLong >= 0 && currentBytes + conn.contentLengthLong != totalBytes) {
+                    throw IllegalStateException("伺服器回傳的模型大小不符。")
                 }
                 totalBytesLive = totalBytes
                 downloadedBytesLive = currentBytes
@@ -372,6 +378,7 @@ class LocalAiPlugin : Plugin() {
                             downloadedBytesLive = currentBytes
                             val now = System.currentTimeMillis()
                             if (now - lastEmitMs >= 300L) {
+                                if (wifiOnly && !isOnWifi()) throw InterruptedException("Wi-Fi 已中斷，已保留下載進度。")
                                 lastEmitMs = now
                                 emitProgress(spec, currentBytes, totalBytes, "downloading")
                             }
@@ -380,8 +387,22 @@ class LocalAiPlugin : Plugin() {
                     }
                 }
 
-                if (contentLength > 0L && part.length() != totalBytes) {
+                if (part.length() != totalBytes) {
                     throw IllegalStateException("下載檔案大小不完整（收到 ${part.length()} / $totalBytes bytes），請再試一次。")
+                }
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                part.inputStream().buffered(256 * 1024).use { input ->
+                    val buffer = ByteArray(256 * 1024)
+                    while (true) {
+                        if (cancelRequested.get()) throw InterruptedException("已取消下載。")
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        digest.update(buffer, 0, read)
+                    }
+                }
+                if (digest.digest().joinToString("") { "%02x".format(it) } != spec.sha256) {
+                    part.delete()
+                    throw IllegalStateException("模型檔案校驗失敗，請重新下載。")
                 }
                 if (finalFile.exists()) finalFile.delete()
                 if (!part.renameTo(finalFile)) {
@@ -418,13 +439,19 @@ class LocalAiPlugin : Plugin() {
             cancelRequested.set(true)
         }
         scope.launch {
-            engineMutex.withLock {
-                val target = modelFile(spec)
-                if (activeModelPath == target.absolutePath) {
-                    closeEngineLocked()
+            try {
+                downloadMutex.withLock {
+                    engineMutex.withLock {
+                        val target = modelFile(spec)
+                        if (activeModelPath == target.absolutePath) closeEngineLocked()
+                        for (file in listOf(target, partFile(spec))) {
+                            if (file.exists() && !file.delete()) throw IllegalStateException("無法刪除模型檔案。")
+                        }
+                    }
                 }
-                target.delete()
-                partFile(spec).delete()
+            } catch (e: Exception) {
+                call.reject(e.message ?: "刪除模型失敗")
+                return@launch
             }
             call.resolve()
         }

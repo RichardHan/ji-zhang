@@ -14,8 +14,12 @@ import ee.forgr.capacitor.social.login.SocialLoginPlugin;
 public class MainActivity extends BridgeActivity implements ModifiedMainActivityForSocialLoginPlugin {
 
     @Override
-    public void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(LocalAiPlugin.class);
+        registerPlugin(BookkeepingSpeechPlugin.class);
+        registerPlugin(ReceiptPhotoPlugin.class);
+        registerPlugin(StayLocationPlugin.class);
+        registerPlugin(VideoReceiptPlugin.class);
         super.onCreate(savedInstanceState);
     }
 

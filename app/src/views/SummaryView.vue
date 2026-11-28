@@ -7,6 +7,7 @@ import { currentMonth, formatMonthLabel, formatTWD, monthKey } from '../dates'
 const { state, monthTransactions, aiSettings } = useApp()
 const insight = ref('')
 const insightError = ref('')
+const insightNotice = ref('')
 const insightLoading = ref(false)
 const localReady = ref(false)
 onMounted(async () => {
@@ -47,19 +48,22 @@ function shiftMonth(delta: number) {
   const yy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   state.selectedMonth = `${yy}-${mm}`
+  insightNotice.value = ''
   insight.value = ''
 }
 
 async function generateInsight() {
-  insightError.value = ''
+  insightError.value = insightNotice.value = ''
   insightLoading.value = true
   try {
-    insight.value = await writeMonthlyInsight(aiSettings(), {
+    const result = await writeMonthlyInsight(aiSettings(), {
       month: formatMonthLabel(state.selectedMonth),
       income: income.value,
       expense: expense.value,
       byCategory: byCategory.value,
     })
+    insight.value = result.text
+    insightNotice.value = result.notice ?? ''
   } catch (err) {
     insightError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -109,6 +113,7 @@ async function generateInsight() {
 
     <div class="card stack" style="margin-top: 16px">
       <strong>AI 觀察</strong>
+      <p v-if="insightNotice" class="banner warn" role="status">{{ insightNotice }}</p>
       <div v-if="insightError" class="banner error">{{ insightError }}</div>
       <p v-if="insight" style="margin: 0; line-height: 1.6">{{ insight }}</p>
       <button class="btn secondary" :disabled="insightLoading || (!state.openRouterKey && !localReady)" @click="generateInsight">

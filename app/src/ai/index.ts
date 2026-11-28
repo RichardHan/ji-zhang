@@ -99,7 +99,7 @@ export async function parseImage(
 export async function writeMonthlyInsight(
   settings: ResolveOptions,
   summary: MonthInsightInput,
-): Promise<string> {
+): Promise<{text: string; notice?: string}> {
   return runChain(settings, (provider) => provider.monthlyInsight(summary))
 }
 

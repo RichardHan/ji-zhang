@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useApp } from './composables/useApp'
+
+import { receiptPlugin, nativeReceipts, sharedInvoice, sharedMail } from './receiptInput'
+import { isMailShare } from './mail'
+import type { PluginListenerHandle } from '@capacitor/core'
 
 const { state, hasSheet, hydrate } = useApp()
 const route = useRoute()
@@ -9,19 +13,32 @@ const router = useRouter()
 const bare = computed(() => Boolean(route.meta.bare))
 const tab = computed(() => String(route.meta.tab || ''))
 
+const shareRoute = computed(() => sharedMail.value ? 'mail' : sharedInvoice.value ? 'invoice' : undefined)
+
 function maybeRedirect() {
   if (!state.ready) return
   const needsSetup = !state.signedIn || !hasSheet.value
   if (needsSetup && route.name !== 'setup') {
     router.replace({ name: 'setup' })
   } else if (!needsSetup && route.name === 'setup') {
-    router.replace({ name: 'home' })
+    router.replace({ name: shareRoute.value ?? 'home' })
   }
 }
+
+const shareListener = nativeReceipts ? receiptPlugin.addListener('sharedInvoice', (share) => {
+  const name = share.mail || isMailShare(share.text ?? '', share.subject) ? 'mail' : 'invoice'
+  if (name === 'mail') sharedMail.value = share
+  else sharedInvoice.value = share
+  if (state.ready && state.signedIn && hasSheet.value && route.name !== name) {
+    void router.push({ name })
+  }
+}) : undefined
+onUnmounted(() => { void shareListener?.then((listener: PluginListenerHandle) => listener.remove()) })
 
 onMounted(async () => {
   await hydrate()
   maybeRedirect()
+  if (shareRoute.value && state.signedIn && hasSheet.value) await router.replace({ name: shareRoute.value })
 })
 
 watch(

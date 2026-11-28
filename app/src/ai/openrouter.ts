@@ -37,6 +37,7 @@ async function complete(options: {
   model: string
   system: string
   user: ChatContent
+  freeOnly: boolean
   useJsonFormat: boolean
 }): Promise<string> {
   const body: Record<string, unknown> = {
@@ -48,6 +49,7 @@ async function complete(options: {
     temperature: 0.2,
     max_tokens: 1200,
   }
+  if (options.freeOnly) body.provider = { max_price: { prompt: 0, completion: 0, request: 0, image: 0 } }
   if (options.useJsonFormat) {
     body.response_format = { type: 'json_object' }
   }
@@ -77,11 +79,6 @@ async function complete(options: {
   return data.choices?.[0]?.message?.content ?? ''
 }
 
-function isRetriableStatus(status?: number): boolean {
-  if (!status) return true
-  return status === 429 || status >= 500
-}
-
 async function isPaidModelId(id: string): Promise<boolean> {
   if (id.endsWith(':free')) return false
   try {
@@ -99,13 +96,14 @@ async function tryModel(
   model: string,
   system: string,
   user: ChatContent,
+  freeOnly: boolean,
 ): Promise<string> {
   try {
-    return await complete({ apiKey, model, system, user, useJsonFormat: true })
+    return await complete({ apiKey, model, system, user, freeOnly, useJsonFormat: true })
   } catch (err) {
     const status = (err as HttpError).status
-    if (status && status >= 400 && status < 500 && status !== 429) {
-      return await complete({ apiKey, model, system, user, useJsonFormat: false })
+    if (status === 400 || status === 422) {
+      return await complete({ apiKey, model, system, user, freeOnly, useJsonFormat: false })
     }
     throw err
   }
@@ -127,16 +125,14 @@ async function runWithCandidates(
   let lastError: Error | null = null
   for (const model of ids) {
     try {
-      const content = await tryModel(settings.apiKey, model, system, user)
+      const content = await tryModel(settings.apiKey, model, system, user, mode === 'auto-free' || model.endsWith(':free'))
       return { value: parse(content), modelUsed: model }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
       const status = (err as HttpError).status
+      if (status === 401) throw lastError
       if (mode === 'manual') break
-      if (!isRetriableStatus(status)) {
-        // 400-class model errors (not found / not allowed): try the next free model.
-        continue
-      }
+
     }
   }
 
@@ -149,7 +145,7 @@ async function runWithCandidates(
     for (const freeId of freeCandidates.ids) {
       if (freeId === manualId.trim()) continue
       try {
-        const content = await tryModel(settings.apiKey, freeId, system, user)
+        const content = await tryModel(settings.apiKey, freeId, system, user, true)
         const notice = manualWasPaid
           ? `付費模型「${manualId}」失敗（${reason}），已改用免費模型「${freeId}」（不會自動切換其他付費模型）。`
           : `指定模型「${manualId}」失敗（${reason}），已改用免費備援模型「${freeId}」。`
@@ -218,7 +214,7 @@ export class OpenRouterProvider implements AiProvider {
     }
   }
 
-  async monthlyInsight(summary: MonthInsightInput): Promise<string> {
+  async monthlyInsight(summary: MonthInsightInput) {
     const lines = summary.byCategory
       .map((c) => `${c.category} ${Math.round(c.amount)} 元`)
       .join('、')
@@ -234,6 +230,6 @@ export class OpenRouterProvider implements AiProvider {
         return text
       },
     )
-    return result.value as string
+    return { text: result.value as string, notice: result.notice }
   }
 }
