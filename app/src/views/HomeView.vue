@@ -194,6 +194,7 @@ const recent = () => state.transactions.slice(0, 5)
     </div>
 
     <ReceiptPhotoInput />
+    <router-link v-if="Capacitor.isPluginAvailable('StayLocation')" class="btn ghost block" style="margin-top: 12px" to="/location">停留記帳建議</router-link>
     <router-link v-if="Capacitor.isPluginAvailable('VideoReceipt')" class="btn ghost block" style="margin-top: 12px" to="/video">影片記帳</router-link>
     <router-link class="btn ghost block" style="margin-top: 12px" to="/mail">匯入 Gmail 郵件</router-link>
     <router-link class="btn ghost block" style="margin-top: 12px" to="/invoice">匯入電子發票／收據</router-link>

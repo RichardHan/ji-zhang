@@ -17,6 +17,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(BookkeepingSpeechPlugin.class);
         registerPlugin(ReceiptPhotoPlugin.class);
+        registerPlugin(StayLocationPlugin.class);
         registerPlugin(VideoReceiptPlugin.class);
         super.onCreate(savedInstanceState);
     }
