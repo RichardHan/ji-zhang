@@ -1,6 +1,6 @@
 import { HEADERS, SHEET_NAME, SPREADSHEET_TITLE } from '../constants'
 import { nowISO } from '../dates'
-import type { DraftTransaction, Transaction, TxType } from '../types'
+import type { DraftTransaction, PendingBatch, Transaction, TxType } from '../types'
 import { getAccessToken, refreshAccessToken } from './auth'
 
 const SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets'
@@ -56,6 +56,7 @@ interface SpreadsheetResource {
   spreadsheetUrl?: string
   properties?: { title?: string }
   sheets?: { properties?: { title?: string; sheetId?: number } }[]
+  namedRanges?: { namedRangeId: string }[]
 }
 
 export async function createSpreadsheet(): Promise<{ id: string; url: string }> {
@@ -129,7 +130,7 @@ function parseType(value: unknown): TxType {
 function parseDate(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value)) {
     // Google Sheets serial date (days since 1899-12-30)
-    const utc = new Date(Date.UTC(1899, 11, 30) + Math.round(value) * 86400000)
+    const utc = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000)
     const y = utc.getUTCFullYear()
     const m = String(utc.getUTCMonth() + 1).padStart(2, '0')
     const d = String(utc.getUTCDate()).padStart(2, '0')
@@ -147,7 +148,7 @@ function parseDate(value: unknown): string {
 
 function rowToTx(row: unknown[], index: number): Transaction | null {
   const id = String(row[7] ?? '').trim()
-  const date = String(row[0] ?? '').trim()
+  const date = parseDate(row[0])
   const amount = parseAmount(row[1])
   if (!id && !date && !amount) return null
   return {
@@ -165,7 +166,7 @@ function rowToTx(row: unknown[], index: number): Transaction | null {
 
 export async function listTransactions(spreadsheetId: string): Promise<Transaction[]> {
   const data = await api<{ values?: unknown[][] }>(
-    `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME + '!A2:H')}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,
+    `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME + '!A2:H')}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`,
   )
   const rows = data.values ?? []
   const result: Transaction[] = []
@@ -184,23 +185,51 @@ function toRow(tx: DraftTransaction & { id: string; createdAt: string }): (strin
   return [tx.date, tx.amount, tx.category, tx.account, tx.note, tx.type, tx.createdAt, tx.id]
 }
 
-export async function appendTransactions(
-  spreadsheetId: string,
-  drafts: DraftTransaction[],
-): Promise<Transaction[]> {
-  const created: Transaction[] = drafts.map((d) => ({
-    ...d,
-    id: crypto.randomUUID(),
-    createdAt: nowISO(),
-  }))
-  await api(
-    `${SHEETS}/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME + '!A:H')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ values: created.map((t) => toRow(t)) }),
-    },
+export async function hasTransactionBatch(spreadsheetId: string, id: string): Promise<boolean> {
+  const meta = await api<SpreadsheetResource>(
+    `${SHEETS}/${spreadsheetId}?fields=namedRanges(namedRangeId)`,
   )
-  return created
+  return meta.namedRanges?.some(range => range.namedRangeId === `jz_batch_${id}`) ?? false
+}
+
+export async function commitTransactionBatch(
+  spreadsheetId: string,
+  batch: Pick<PendingBatch, 'id' | 'drafts'>,
+): Promise<'written' | 'already-written'> {
+  const sheetId = await sheetIdOf(spreadsheetId)
+  const marker = `jz_batch_${batch.id}`
+  const createdAt = nowISO()
+  const rows = batch.drafts.map((draft, index) => ({
+    values: toRow({ ...draft, createdAt, id: `${batch.id}-${index + 1}` }).map((value) => ({
+      userEnteredValue: typeof value === 'number' ? { numberValue: value } : { stringValue: value },
+    })),
+  }))
+  try {
+    // A duplicate named range ID makes Google reject the entire atomic batch.
+    // Anchor the marker on H1 so deleting a transaction does not allow replay.
+    await api(`${SHEETS}/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      body: JSON.stringify({
+        requests: [
+          {
+            addNamedRange: {
+              namedRange: {
+                namedRangeId: marker,
+                name: marker,
+                range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 7, endColumnIndex: 8 },
+              },
+            },
+          },
+          { appendCells: { sheetId, rows, fields: 'userEnteredValue' } },
+        ],
+      }),
+    })
+    return 'written'
+  } catch (err) {
+    // A timeout/lost response and a concurrent confirmation can both leave a committed marker.
+    if (await hasTransactionBatch(spreadsheetId, batch.id).catch(() => false)) return 'already-written'
+    throw err
+  }
 }
 
 export async function updateTransaction(
