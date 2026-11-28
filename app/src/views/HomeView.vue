@@ -15,6 +15,7 @@ const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
 const photoName = ref('')
+const photoReading = ref(false)
 const photoDataUrl = ref('')
 const photoInput = ref<HTMLInputElement | null>(null)
 const localReady = ref(false)
@@ -146,11 +147,15 @@ function onPickPhoto(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
+  photoDataUrl.value = ''
+  photoReading.value = true
   photoName.value = file.name
   const reader = new FileReader()
   reader.onload = () => {
     photoDataUrl.value = typeof reader.result === 'string' ? reader.result : ''
   }
+  reader.onerror = () => { parseError.value = '無法讀取照片，請重新選取。'; clearPhoto() }
+  reader.onloadend = () => { photoReading.value = false }
   reader.readAsDataURL(file)
 }
 
@@ -168,7 +173,7 @@ watch(prompt, (text) => {
 })
 
 async function parse() {
-  if (speechBusy.value || parsing.value || reviewBusy.value || state.loading || (!prompt.value.trim() && !photoDataUrl.value) || !canParse()) return
+  if (photoReading.value || speechBusy.value || parsing.value || reviewBusy.value || state.loading || (!prompt.value.trim() && !photoDataUrl.value) || !canParse()) return
   restoredDraftId = null
   const book = reviewBook.value
   parseError.value = ''
@@ -225,7 +230,7 @@ const recent = () => state.transactions.slice(0, 5)
       </div>
       <input ref="photoInput" class="sr-only" type="file" accept="image/*" @change="onPickPhoto" />
       <div class="row">
-        <button type="button" class="btn ghost grow" :disabled="parsing" @click="photoInput?.click()">選取收據照片</button>
+        <button type="button" class="btn ghost grow" :disabled="parsing || speechBusy || photoReading" @click="photoInput?.click()">選取收據照片</button>
         <button v-if="photoDataUrl" type="button" class="btn ghost" :disabled="parsing" @click="clearPhoto">清除照片</button>
       </div>
       <p v-if="photoName" class="muted small">已選：{{ photoName }}</p>
@@ -241,7 +246,7 @@ const recent = () => state.transactions.slice(0, 5)
         <p v-if="speechError" class="banner error" role="alert" style="margin: 0">{{ speechError }}</p>
       </template>
       <p class="muted small" style="margin: 0">{{ state.aiProvider === 'local' ? '文字與所選照片只在裝置上解析。' : state.aiProvider === 'auto' ? '按下解析會優先使用本機模型；本機無法解析時會將文字與所選照片送至 OpenRouter。' : '按下解析會將文字與所選照片送至 OpenRouter。' }}</p>
-      <button class="btn accent block" :disabled="speechBusy || parsing || reviewBusy || state.loading || (!prompt.trim() && !photoDataUrl) || !canParse()" @click="parse">
+      <button class="btn accent block" :disabled="photoReading || speechBusy || parsing || reviewBusy || state.loading || (!prompt.trim() && !photoDataUrl) || !canParse()" @click="parse">
         {{ parsing ? '解析中…' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>

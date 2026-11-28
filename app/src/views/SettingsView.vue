@@ -282,7 +282,7 @@ async function onDownloadNano() {
     <div class="card stack" style="margin-top: 16px">
       <strong>AI 來源</strong>
       <p class="muted small">
-        預設「自動」順序：本機 LiteRT-LM（已下載時）→ 裝置內建 Gemini Nano → OpenRouter（自動選免費模型）。
+        預設「自動」順序：本機 LiteRT-LM（已下載時）→ 裝置內建 Gemini Nano → OpenRouter（自動選免費模型）。要使用指定的雲端模型，請選「OpenRouter」。
       </p>
       <div class="seg">
         <button type="button" :class="{ active: providerInput === 'auto' }" @click="providerInput = 'auto'">自動</button>

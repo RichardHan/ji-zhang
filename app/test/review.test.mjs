@@ -497,3 +497,18 @@ test('local-only mode with no runtime never sends the prompt to OpenRouter', asy
   await assert.rejects(parseText({aiProvider:'local',apiKey:'fixture',enableNanoFallback:true}, '午餐'), /本機/)
   assert.equal(requests,0)
 })
+
+test('automatic local-to-cloud fallback stays free even with a saved paid manual override', async t => {
+  const {parseText} = await server.ssrLoadModule('/src/ai/index.ts')
+  await storage.setModelsCache('', 0)
+  const tried = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/models')) return Response.json({data:[{id:'vendor/fixture:free'}]})
+    const body = JSON.parse(init.body)
+    tried.push(body.model)
+    assert.equal(body.provider.max_price.prompt,0)
+    return Response.json({choices:[{message:{content:'{"transactions":[{"note":"午餐","amount":120}]}'}}]})
+  })
+  await parseText({aiProvider:'auto',apiKey:'fixture',textModelMode:'manual',textModel:'vendor/paid'},'午餐')
+  assert.deepEqual(tried,['vendor/fixture:free'])
+})

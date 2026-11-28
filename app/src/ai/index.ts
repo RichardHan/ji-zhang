@@ -37,7 +37,9 @@ async function runChain<T>(
 ): Promise<T> {
   const litert = new LocalProvider(settings.localModelId, 'litert')
   const nano = new LocalProvider(settings.localModelId, 'nano')
-  const cloud = openRouter(settings)
+  const cloud = openRouter(settings.aiProvider === 'auto'
+    ? { ...settings, textModelMode: 'auto-free', visionModelMode: 'auto-free' }
+    : settings)
 
   if (settings.aiProvider === 'openrouter') {
     return run(cloud)
