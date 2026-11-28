@@ -2,7 +2,7 @@
 import { onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { registerPlugin } from '@capacitor/core'
-import { parseTransactionsWithAI } from '../ai/openrouter'
+import { parseText } from '../ai'
 import { useApp } from '../composables/useApp'
 import { missingDraftFields } from '../review'
 import { videoDrafts, transcribeVideoAudio } from '../video'
@@ -11,7 +11,7 @@ import type { DraftTransaction } from '../types'
 const plugin = registerPlugin<{
   select(options: { camera: boolean; audio: boolean }): Promise<{ frames: string[]; audio?: string; audioNotice?: string } | undefined>
 }>('VideoReceipt')
-const { state, reviewBook, reviewBusy, stageDrafts } = useApp()
+const { state, reviewBook, reviewBusy, stageDrafts, aiSettings } = useApp()
 const router = useRouter()
 const useAudio = ref(false)
 const status = ref('')
@@ -38,7 +38,7 @@ async function select(camera: boolean) {
   const request = new AbortController()
   controller = request
   sourceBook = reviewBook.value
-  const audio = useAudio.value && Boolean(state.openRouterKey)
+  const audio = state.aiProvider !== 'local' && useAudio.value && Boolean(state.openRouterKey)
   status.value = '正在讀取影片畫面…'
   try {
     const clip = await plugin.select({ camera, audio })
@@ -52,7 +52,11 @@ async function select(camera: boolean) {
         const text = await transcribeVideoAudio(state.openRouterKey, clip.audio, request.signal)
         if (request.signal.aborted) return
         transcript.value = text
-        if (text) spoken = (await parseTransactionsWithAI(state.openRouterKey, state.model, text)).transactions
+        if (text) {
+          const result = await parseText(aiSettings(), text)
+          spoken = result.transactions
+          notice.value = result.notice ?? ''
+        }
         else notice.value = '沒有辨識到口述內容。'
       } catch {
         if (request.signal.aborted) return
@@ -86,7 +90,7 @@ async function stage() {
     <h1 class="page-title">影片記帳</h1>
     <p class="page-sub">錄製或選取 60 秒以內的短片。請讓收據的商家、日期與實付金額清楚入鏡。</p>
     <div v-if="!drafts.length && !status" class="card stack">
-      <label><input v-model="useAudio" type="checkbox" :disabled="!state.openRouterKey"> 同時辨識口述金額</label>
+      <label><input v-model="useAudio" type="checkbox" :disabled="!state.openRouterKey || state.aiProvider === 'local'"> 同時辨識口述金額</label>
       <p class="muted small">畫面在裝置上辨識。勾選後會將 AAC 音軌及轉錄文字傳至 OpenRouter，可能產生費用。<router-link v-if="!state.openRouterKey" to="/settings">設定 API 金鑰</router-link></p>
       <button class="btn accent" @click="select(true)">錄製短片</button>
       <button class="btn ghost" @click="select(false)">選取短片</button>

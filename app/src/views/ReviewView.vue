@@ -126,6 +126,7 @@ function stopRetry(id: string) {
         <summary>核對收據照片</summary>
         <img :src="receiptPreviews.get(batch.id)" alt="本次收據照片" style="width: 100%; max-height: 42vh; object-fit: contain" />
       </details>
+      <p v-if="batch.notice" class="banner warn" role="status">{{ batch.notice }}</p>
       <small v-if="batch.modelUsed" class="muted">模型：{{ batch.modelUsed }}</small>
       <p v-if="batch.submitted" class="banner warn" role="status">
         這批已嘗試寫入。如果上次結果不明，可以安全重試；不會重複入帳。

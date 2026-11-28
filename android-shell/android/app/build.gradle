@@ -1,4 +1,5 @@
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace = "com.richardhan.jizhang"
@@ -10,6 +11,11 @@ android {
         versionCode 2
         versionName "2.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Phone-only APK (Samsung S26 Ultra and other arm64 devices). Drops the
+        // LiteRT-LM x86_64 native libs so the artifact stays well under the 100 MB CI cap.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -21,6 +27,9 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+    kotlinOptions {
+        jvmTarget = '21'
     }
 }
 
@@ -42,6 +51,11 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // On-device LLM runtime (Gemma 4 E2B / Qwen3.5-0.8B-VL multimodal).
+    implementation 'com.google.ai.edge.litertlm:litertlm-android:0.19.1'
+    // No-download system fallback on supported flagships (e.g. Samsung S26 Ultra AICore).
+    implementation 'com.google.mlkit:genai-prompt:1.0.0-beta5'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 }
 
 apply from: 'capacitor.build.gradle'

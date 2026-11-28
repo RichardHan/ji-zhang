@@ -45,7 +45,10 @@ def scenario(browser, url, edit, expected_text, expected_label):
                     recognize: async () => ({{text: {json.dumps(TRANSCRIPT)}}})
                 }}
             """))
-        page.route("https://openrouter.ai/**", parse_request)
+        page.route("https://openrouter.ai/api/v1/models", lambda r: r.fulfill(json={
+            "data": [{"id": "test/text:free", "architecture": {"input_modalities": ["text"]}}]
+        }))
+        page.route("https://openrouter.ai/api/v1/chat/completions", parse_request)
         page.route("https://sheets.googleapis.com/**", sheets_request)
         page.add_init_script("""
             for (const [key, value] of Object.entries({

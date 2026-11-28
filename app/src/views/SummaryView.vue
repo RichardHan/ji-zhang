@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { monthlyInsight } from '../ai/openrouter'
+import { computed, onMounted, ref } from 'vue'
+import { hasAnyLocalReady, writeMonthlyInsight } from '../ai'
 import { useApp } from '../composables/useApp'
 import { currentMonth, formatMonthLabel, formatTWD, monthKey } from '../dates'
 
-const { state, monthTransactions } = useApp()
+const { state, monthTransactions, aiSettings } = useApp()
 const insight = ref('')
 const insightError = ref('')
+const insightNotice = ref('')
 const insightLoading = ref(false)
+const localReady = ref(false)
+onMounted(async () => {
+  localReady.value = await hasAnyLocalReady({ localModelId: state.localModelId, enableNanoFallback: state.enableNanoFallback })
+})
 
 const months = computed(() => {
   const set = new Set(state.transactions.map((t) => monthKey(t.date)).filter(Boolean))
@@ -43,19 +48,22 @@ function shiftMonth(delta: number) {
   const yy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   state.selectedMonth = `${yy}-${mm}`
+  insightNotice.value = ''
   insight.value = ''
 }
 
 async function generateInsight() {
-  insightError.value = ''
+  insightError.value = insightNotice.value = ''
   insightLoading.value = true
   try {
-    insight.value = await monthlyInsight(state.openRouterKey, state.model, {
+    const result = await writeMonthlyInsight(aiSettings(), {
       month: formatMonthLabel(state.selectedMonth),
       income: income.value,
       expense: expense.value,
       byCategory: byCategory.value,
     })
+    insight.value = result.text
+    insightNotice.value = result.notice ?? ''
   } catch (err) {
     insightError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -105,12 +113,13 @@ async function generateInsight() {
 
     <div class="card stack" style="margin-top: 16px">
       <strong>AI 觀察</strong>
+      <p v-if="insightNotice" class="banner warn" role="status">{{ insightNotice }}</p>
       <div v-if="insightError" class="banner error">{{ insightError }}</div>
       <p v-if="insight" style="margin: 0; line-height: 1.6">{{ insight }}</p>
-      <button class="btn secondary" :disabled="insightLoading || !state.openRouterKey" @click="generateInsight">
+      <button class="btn secondary" :disabled="insightLoading || (!state.openRouterKey && !localReady)" @click="generateInsight">
         {{ insightLoading ? '撰寫中…' : insight ? '再寫一次' : '請 AI 寫一段觀察' }}
       </button>
-      <p v-if="!state.openRouterKey" class="muted small">請先在設定裡填入 OpenRouter 金鑰。</p>
+      <p v-if="!state.openRouterKey && !localReady" class="muted small">請先在設定裡下載本機模型或填入 OpenRouter 金鑰（預設會自動選免費模型）。</p>
     </div>
   </div>
 </template>

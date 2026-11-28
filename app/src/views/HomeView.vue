@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { parseTransactionsWithAI } from '../ai/openrouter'
+import { hasAnyLocalReady, parseText, parseImage } from '../ai'
 import { useApp } from '../composables/useApp'
 import { formatTWD } from '../dates'
 import { bookkeepingSpeech, canUseBookkeepingSpeech } from '../speech'
@@ -9,11 +9,16 @@ import ReceiptPhotoInput from '../components/ReceiptPhotoInput.vue'
 import { Capacitor } from '@capacitor/core'
 import { storage } from '../storage'
 
-const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts } = useApp()
+const { state, reviewBook, reviewBusy, pendingBatches, stageDrafts, aiSettings } = useApp()
 const router = useRouter()
 const prompt = ref('')
 const parsing = ref(false)
 const parseError = ref('')
+const photoName = ref('')
+const photoReading = ref(false)
+const photoDataUrl = ref('')
+const photoInput = ref<HTMLInputElement | null>(null)
+const localReady = ref(false)
 const listening = ref(false)
 const restoring = ref(canUseBookkeepingSpeech)
 const speechBusy = computed(() => listening.value || restoring.value)
@@ -118,6 +123,48 @@ async function dictate() {
   }
 }
 
+onMounted(async () => {
+  localReady.value = await hasAnyLocalReady({
+    localModelId: state.localModelId,
+    enableNanoFallback: state.enableNanoFallback,
+  })
+})
+
+const canUseCloud = () => Boolean(state.openRouterKey)
+const canParse = () => {
+  if (state.aiProvider === 'openrouter') return canUseCloud()
+  if (state.aiProvider === 'local') return localReady.value
+  return localReady.value || canUseCloud()
+}
+
+function providerLabel(provider: 'local' | 'nano' | 'openrouter'): string {
+  if (provider === 'local') return '本機 LiteRT-LM'
+  if (provider === 'nano') return '本機 Gemini Nano'
+  return 'OpenRouter'
+}
+
+function onPickPhoto(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  photoDataUrl.value = ''
+  photoReading.value = true
+  photoName.value = file.name
+  const reader = new FileReader()
+  reader.onload = () => {
+    photoDataUrl.value = typeof reader.result === 'string' ? reader.result : ''
+  }
+  reader.onerror = () => { parseError.value = '無法讀取照片，請重新選取。'; clearPhoto() }
+  reader.onloadend = () => { photoReading.value = false }
+  reader.readAsDataURL(file)
+}
+
+function clearPhoto() {
+  photoName.value = ''
+  photoDataUrl.value = ''
+  if (photoInput.value) photoInput.value.value = ''
+}
+
 watch(prompt, (text) => {
   if (!text.trim()) {
     usedVoice.value = false
@@ -126,7 +173,7 @@ watch(prompt, (text) => {
 })
 
 async function parse() {
-  if (speechBusy.value || parsing.value || reviewBusy.value || state.loading || !prompt.value.trim() || !state.openRouterKey) return
+  if (photoReading.value || speechBusy.value || parsing.value || reviewBusy.value || state.loading || (!prompt.value.trim() && !photoDataUrl.value) || !canParse()) return
   restoredDraftId = null
   const book = reviewBook.value
   parseError.value = ''
@@ -134,9 +181,14 @@ async function parse() {
   parsing.value = true
 
   try {
-    const result = await parseTransactionsWithAI(state.openRouterKey, state.model, prompt.value)
-    await stageDrafts(result.transactions, { kind: usedVoice.value ? 'voice' : 'ai-text', modelUsed: result.modelUsed }, book)
+    const result = photoDataUrl.value
+      ? await parseImage(aiSettings(), photoDataUrl.value, prompt.value)
+      : await parseText(aiSettings(), prompt.value)
+    if (!mounted || book !== reviewBook.value) return
+    const kind = photoDataUrl.value ? 'photo' : usedVoice.value ? 'voice' : 'ai-text'
+    await stageDrafts(result.transactions, { kind, modelUsed: providerLabel(result.provider) + ' · ' + result.modelUsed, notice: result.notice }, book)
     prompt.value = ''
+    clearPhoto()
     if (router.currentRoute.value.name === 'home') await router.push({ name: 'review' })
   } catch (err) {
     parseError.value = err instanceof Error ? err.message : String(err)
@@ -153,10 +205,10 @@ const recent = () => state.transactions.slice(0, 5)
     <h1 class="page-title">記一筆</h1>
     <p class="page-sub">打一句話，例如「午餐 120 信用卡」或「昨天晚餐 350 搭車 180」。</p>
 
-    <div v-if="!state.openRouterKey" class="banner warn">
-      還沒有 OpenRouter 金鑰。可以先用手動記帳，或到
+    <div v-if="!canParse()" class="banner warn">
+      目前選擇的 AI 來源尚未就緒。可以先用手動記帳，或到
       <router-link to="/settings">設定</router-link>
-      貼上金鑰後再用 AI。
+      下載本機模型或貼上金鑰（預設會自動選免費模型）。
     </div>
     <div v-if="parseError" class="banner error">{{ parseError }}</div>
     <p><router-link to="/review">待確認清單（{{ pendingCount }} 筆）</router-link></p>
@@ -176,6 +228,13 @@ const recent = () => state.transactions.slice(0, 5)
           @keydown.ctrl.enter.prevent="parse"
         />
       </div>
+      <input ref="photoInput" class="sr-only" type="file" accept="image/*" @change="onPickPhoto" />
+      <div class="row">
+        <button type="button" class="btn ghost grow" :disabled="parsing || speechBusy || photoReading" @click="photoInput?.click()">選取收據照片</button>
+        <button v-if="photoDataUrl" type="button" class="btn ghost" :disabled="parsing" @click="clearPhoto">清除照片</button>
+      </div>
+      <p v-if="photoName" class="muted small">已選：{{ photoName }}</p>
+      <img v-if="photoDataUrl" class="receipt-thumb" :src="photoDataUrl" alt="收據預覽" />
       <template v-if="canUseBookkeepingSpeech">
         <p id="speech-privacy" class="muted small" style="margin: 0">
           Android 的語音辨識服務可能會透過網路處理音訊；記帳 App 只接收轉成的文字。
@@ -186,8 +245,8 @@ const recent = () => state.transactions.slice(0, 5)
         <p v-if="speechStatus" class="muted small" role="status" style="margin: 0">{{ speechStatus }}</p>
         <p v-if="speechError" class="banner error" role="alert" style="margin: 0">{{ speechError }}</p>
       </template>
-      <p class="muted small" style="margin: 0">按下解析會將文字傳給 OpenRouter；你確認後才會寫入試算表。</p>
-      <button class="btn accent block" :disabled="speechBusy || parsing || reviewBusy || state.loading || !prompt.trim() || !state.openRouterKey" @click="parse">
+      <p class="muted small" style="margin: 0">{{ state.aiProvider === 'local' ? '文字與所選照片只在裝置上解析。' : state.aiProvider === 'auto' ? '按下解析會優先使用本機模型；本機無法解析時會將文字與所選照片送至 OpenRouter。' : '按下解析會將文字與所選照片送至 OpenRouter。' }}</p>
+      <button class="btn accent block" :disabled="photoReading || speechBusy || parsing || reviewBusy || state.loading || (!prompt.trim() && !photoDataUrl) || !canParse()" @click="parse">
         {{ parsing ? '解析中…' : '解析並預覽' }}
       </button>
       <button class="btn ghost block" @click="router.push('/add')">改用手動記一筆</button>

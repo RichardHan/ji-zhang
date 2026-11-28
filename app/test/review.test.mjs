@@ -13,7 +13,7 @@ let loseResponse = false
 let failMarkerRead = false
 let failList = false
 let modelResult = []
-let server, app, storage, commitTransactionBatch, parseTransactionsWithAI, similarTransactionKey
+let server, app, storage, commitTransactionBatch, OpenRouterProvider, similarTransactionKey
 
 function googleFixture(input, init) {
   const url = new URL(input)
@@ -86,7 +86,7 @@ before(async () => {
   app = store.useApp()
   ;({ storage } = await server.ssrLoadModule('/src/storage.ts'))
   ;({ commitTransactionBatch } = await server.ssrLoadModule('/src/google/sheets.ts'))
-  ;({ parseTransactionsWithAI } = await server.ssrLoadModule('/src/ai/openrouter.ts'))
+  ;({ OpenRouterProvider } = await server.ssrLoadModule('/src/ai/openrouter.ts'))
   ;({ similarTransactionKey } = await server.ssrLoadModule('/src/review.ts'))
 })
 
@@ -197,7 +197,7 @@ test('AI leaves missing data and unsupported currency unresolved, but respects e
     { date: '2026-02-30', amount: true, note: '未確認' },
     { date: '今天', amount: 70, currency: 'USD', note: '海外付款' },
   ]
-  const { transactions } = await parseTransactionsWithAI('not-a-real-key', '', '測試文字')
+  const { transactions } = await new OpenRouterProvider({ apiKey: 'fixture-key', textModelMode: 'auto-free' }).parseText('測試文字')
   assert.deepEqual(transactions.map(({ date, amount }) => [date, amount]), [
     ['2026-10-05', 120], ['', 55], ['', 0], ['2026-10-06', 0],
   ])
@@ -446,4 +446,81 @@ test('lookup limits place geometry, filters free parking and withholds restauran
   assert.deepEqual((await read()).map(p => p.name), ['麵店', '中正路'])
   elements.at(-1).tags.highway = 'primary'
   assert.deepEqual((await read()).map(p => p.name), ['中正路'])
+})
+
+test('a refreshed or cached model catalog preserves prices and image eligibility', async t => {
+  const { listOpenRouterModels, rankFreeCandidates } = await server.ssrLoadModule('/src/ai/openrouter-models.ts')
+  const raw = [
+    { id: 'vendor/paid', pricing: {prompt: '0.01', completion: '0.02'} },
+    { id: 'vendor/unknown', pricing: {} },
+    { id: 'vendor/free-vision', pricing: {prompt: '0', completion: '0'}, architecture: {input_modalities: ['text','image']} },
+    { id: 'vendor/text:free' },
+  ]
+  let fetches = 0
+  t.mock.method(globalThis, 'fetch', async () => { fetches++; return Response.json({data:raw}) })
+  const fresh = await listOpenRouterModels({force:true})
+  const cached = await listOpenRouterModels()
+  assert.equal(fetches, 1)
+  assert.deepEqual(cached, fresh)
+  assert.deepEqual(rankFreeCandidates(cached,'vision'), ['vendor/free-vision'])
+  assert.deepEqual(rankFreeCandidates(cached,'text'), ['vendor/free-vision','vendor/text:free'])
+})
+
+test('paid fallback uses only zero-price routes and reports the model for entries and monthly reports', async t => {
+  const sent = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/models')) return Response.json({data: [
+      {id:'vendor/paid',pricing:{prompt:'1',completion:'1'}}, {id:'vendor/no-price'},
+      {id:'vendor/free', pricing:{prompt:'0',completion:'0'}} ]})
+    const body = JSON.parse(init.body)
+    sent.push(body.model)
+    if (body.model === 'vendor/paid') return Response.json({error:{message:'rate limit'}},{status:429})
+    assert.equal(body.model,'vendor/free')
+    assert.deepEqual(body.provider.max_price, {prompt:0,completion:0,request:0,image:0})
+    return Response.json({choices:[{message:{content:'{"transactions":[{"note":"午餐","amount":120}]}'}}]})
+  })
+  await storage.setModelsCache('', 0)
+  const settings = { apiKey:'fixture', textModelMode:'manual', textModel:'vendor/paid', paidFailureFallbackToFree:true }
+  const ai = new OpenRouterProvider(settings)
+  const result = await ai.parseText('午餐 120')
+  assert.match(result.notice,/vendor\/paid.*vendor\/free/)
+  assert.match((await ai.monthlyInsight({month:'11',expense:1,income:0,byCategory:[]})).notice,/vendor\/free/)
+  await assert.rejects(new OpenRouterProvider({...settings,paidFailureFallbackToFree:false}).parseText('飯'), /rate limit/)
+  assert.deepEqual(sent,['vendor/paid','vendor/free','vendor/paid','vendor/free','vendor/paid'])
+  await storage.setModelsCache('', 0)
+})
+
+test('local-only mode with no runtime never sends the prompt to OpenRouter', async t => {
+  const { parseText } = await server.ssrLoadModule('/src/ai/index.ts')
+  let requests = 0
+  t.mock.method(globalThis, 'fetch', async () => { requests++; throw Error('unexpected request') })
+  await assert.rejects(parseText({aiProvider:'local',apiKey:'fixture',enableNanoFallback:true}, '午餐'), /本機/)
+  assert.equal(requests,0)
+})
+
+test('automatic local-to-cloud fallback stays free even with a saved paid manual override', async t => {
+  const {parseText} = await server.ssrLoadModule('/src/ai/index.ts')
+  await storage.setModelsCache('', 0)
+  const tried = []
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/models')) return Response.json({data:[{id:'vendor/fixture:free'}]})
+    const body = JSON.parse(init.body)
+    tried.push(body.model)
+    assert.equal(body.provider.max_price.prompt,0)
+    return Response.json({choices:[{message:{content:'{"transactions":[{"note":"午餐","amount":120}]}'}}]})
+  })
+  await parseText({aiProvider:'auto',apiKey:'fixture',textModelMode:'manual',textModel:'vendor/paid'},'午餐')
+  assert.deepEqual(tried,['vendor/fixture:free'])
+})
+
+test('image parsing cannot route to text-only models when the catalog has no eligible vision provider', async t => {
+  const {resolveModelCandidates, fallbackCandidateIds} = await server.ssrLoadModule('/src/ai/openrouter-models.ts')
+  const {FALLBACK_MODEL} = await server.ssrLoadModule('/src/constants.ts')
+  await storage.setModelsCache('', 0)
+  t.mock.method(globalThis,'fetch',async () => Response.json({data:[
+    {id:'vendor/text:free',architecture:{input_modalities:['text']}},
+    {id:'vendor/vision-paid',pricing:{prompt:'1',completion:'1'},architecture:{input_modalities:['text','image']}},
+  ]}))
+  await assert.rejects(resolveModelCandidates('vision','auto-free',''),/沒有免費的圖片模型/)
+  assert.ok(!fallbackCandidateIds('vision').includes(FALLBACK_MODEL))
 })
