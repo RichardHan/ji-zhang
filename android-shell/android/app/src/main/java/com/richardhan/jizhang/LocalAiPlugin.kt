@@ -457,7 +457,10 @@ class LocalAiPlugin : Plugin() {
                     engineMutex.withLock {
                         val target = modelFile(spec)
                         if (activeModelPath == target.absolutePath) closeEngineLocked()
-                        for (file in listOf(target, partFile(spec))) {
+                        val caches = File(context.cacheDir, "litert-lm").listFiles().orEmpty().filter {
+                            it.isFile && (it.name.startsWith(spec.fileName + "_") || it.name.startsWith(spec.fileName + "."))
+                        }
+                        for (file in listOf(target, partFile(spec)) + caches) {
                             if (file.exists() && !file.delete()) throw IllegalStateException("無法刪除模型檔案。")
                         }
                     }
